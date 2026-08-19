@@ -1,0 +1,493 @@
+openapi: 3.1.0
+info:
+  title: Project Mittens Fleet Optimization & MOMDP Matching Engine API
+  version: 1.0.0
+  description: >
+    Production REST API for Project Mittens, a high-performance, concurrent, and mathematically rigorous
+    Go-based carrier fleet optimization and MOMDP competitor-aware dispatch engine.
+paths:
+  /api/v1/optimize:
+    post:
+      summary: Execute single-epoch optimal fleet-to-load matching
+      description: >
+        Solves the instantaneous Linear Assignment Problem (LAP) across the active fleet and available loads
+        under stochastic POMDP competitor belief dynamics using Powell policy approximations (CFA, VFA, DLA).
+      operationId: optimizeDispatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OptimizeRequest'
+      responses:
+        '200':
+          description: Optimal dispatch matching and pricing assignments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimizeResponse'
+        '400':
+          description: Invalid request payload or mathematical parameter error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal optimization engine failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/simulate:
+    post:
+      summary: Execute multi-epoch rolling horizon continuous fleet simulation
+      description: >
+        Runs an end-to-end rolling horizon simulation across multiple daily decision epochs with intermediate
+        relay handoffs, multi-leg tour synthesis, and continuous KPI accounting.
+      operationId: simulateRollingHorizon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulateRequest'
+      responses:
+        '200':
+          description: Complete simulation audit report, daily KPIs, and work order journal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulateResponse'
+        '400':
+          description: Invalid simulation parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal simulation engine error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /healthz:
+    get:
+      summary: Liveness and health check endpoint
+      description: Returns service operational health status.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy and operational
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /metrics:
+    get:
+      summary: Prometheus metrics exposition endpoint
+      description: Exposes low-cardinality system metrics, LAP execution latencies, and invariant tracking counters.
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Standard Prometheus text format metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  schemas:
+    LocationDTO:
+      type: object
+      required:
+        - node_id
+        - lat
+        - lon
+      properties:
+        node_id:
+          type: string
+          example: "CHI"
+        lat:
+          type: number
+          format: double
+          example: 41.8781
+        lon:
+          type: number
+          format: double
+          example: -87.6298
+
+    EquipmentDTO:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [DRY_VAN, REEFER, FLATBED, TANKER]
+          example: "DRY_VAN"
+
+    DriverDTO:
+      type: object
+      required:
+        - id
+        - current_location
+        - home_location
+        - available_epoch
+      properties:
+        id:
+          type: string
+          example: "DRV_101"
+        current_location:
+          $ref: '#/components/schemas/LocationDTO'
+        home_location:
+          $ref: '#/components/schemas/LocationDTO'
+        available_epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        drive_hours_remaining:
+          type: number
+          format: double
+          example: 11.0
+        duty_hours_remaining:
+          type: number
+          format: double
+          example: 14.0
+        equipment:
+          $ref: '#/components/schemas/EquipmentDTO'
+
+    LoadDTO:
+      type: object
+      required:
+        - id
+        - origin
+        - destination
+        - pickup_earliest_epoch
+        - pickup_latest_epoch
+        - delivery_earliest_epoch
+        - delivery_latest_epoch
+        - revenue
+      properties:
+        id:
+          type: string
+          example: "LOAD_5001"
+        origin:
+          $ref: '#/components/schemas/LocationDTO'
+        destination:
+          $ref: '#/components/schemas/LocationDTO'
+        pickup_earliest_epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        pickup_latest_epoch:
+          type: integer
+          format: int64
+          example: 1787169600
+        delivery_earliest_epoch:
+          type: integer
+          format: int64
+          example: 1787148000
+        delivery_latest_epoch:
+          type: integer
+          format: int64
+          example: 1787299200
+        revenue:
+          type: number
+          format: double
+          example: 2450.00
+        required_equipment:
+          type: string
+          enum: [DRY_VAN, REEFER, FLATBED, TANKER]
+          example: "DRY_VAN"
+
+    FacilityDTO:
+      type: object
+      required:
+        - id
+        - location
+        - type
+      properties:
+        id:
+          type: string
+          example: "FAC-SDF-HUB"
+        name:
+          type: string
+          example: "Louisville Relay Hub"
+        location:
+          $ref: '#/components/schemas/LocationDTO'
+        type:
+          type: string
+          enum: [RELAY_HUB, TERMINAL, DROP_YARD, CUSTOMER_DC]
+          example: "RELAY_HUB"
+        average_dwell_minutes:
+          type: integer
+          example: 60
+
+    OptimizeRequest:
+      type: object
+      required:
+        - epoch
+        - drivers
+        - loads
+      properties:
+        epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriverDTO'
+        loads:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoadDTO'
+        policy_class:
+          type: string
+          enum: [CFA, VFA, DLA]
+          default: "CFA"
+        competitor_scale:
+          type: integer
+          default: 0
+          description: "Number of competitor carriers N (0 = Monopolistic baseline)"
+
+    MatchDTO:
+      type: object
+      required:
+        - driver_id
+        - load_id
+        - dispatch_epoch
+        - estimated_contribution
+      properties:
+        driver_id:
+          type: string
+          example: "DRV_101"
+        load_id:
+          type: string
+          example: "LOAD_5001"
+        dispatch_epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        estimated_contribution:
+          type: number
+          format: double
+          example: 642.50
+
+    OptimizeResponse:
+      type: object
+      required:
+        - run_id
+        - epoch
+        - match_count
+        - matches
+        - total_net_contribution
+      properties:
+        run_id:
+          type: string
+          example: "OPT_20260819_001"
+        epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        match_count:
+          type: integer
+          example: 2
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchDTO'
+        total_net_contribution:
+          type: number
+          format: double
+          example: 1285.00
+        execution_duration_ms:
+          type: number
+          format: double
+          example: 4.82
+
+    SimulateRequest:
+      type: object
+      required:
+        - run_id
+        - start_epoch
+        - horizon_days
+        - drivers
+        - load_schedule
+      properties:
+        run_id:
+          type: string
+          example: "SIM_7D_PROD"
+        start_epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        horizon_days:
+          type: integer
+          default: 7
+          example: 7
+        decision_step_hours:
+          type: integer
+          default: 24
+          example: 24
+        enable_relays:
+          type: boolean
+          default: true
+        min_relay_haul_miles:
+          type: number
+          format: double
+          default: 450.0
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriverDTO'
+        facilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/FacilityDTO'
+        load_schedule:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoadDTO'
+
+    DailyKPISnapshotDTO:
+      type: object
+      required:
+        - day_index
+        - epoch
+        - active_drivers
+        - total_loaded_miles
+        - total_empty_miles
+        - empty_mile_ratio
+        - gross_revenue
+        - total_cost
+        - net_contribution
+        - direct_tour_count
+        - relay_exchange_count
+      properties:
+        day_index:
+          type: integer
+          example: 1
+        epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        active_drivers:
+          type: integer
+          example: 50
+        total_loaded_miles:
+          type: number
+          format: double
+          example: 12500.0
+        total_empty_miles:
+          type: number
+          format: double
+          example: 1875.0
+        empty_mile_ratio:
+          type: number
+          format: double
+          example: 0.1304
+        gross_revenue:
+          type: number
+          format: double
+          example: 42500.00
+        total_cost:
+          type: number
+          format: double
+          example: 24350.00
+        net_contribution:
+          type: number
+          format: double
+          example: 18150.00
+        direct_tour_count:
+          type: integer
+          example: 38
+        relay_exchange_count:
+          type: integer
+          example: 6
+
+    SimulateResponse:
+      type: object
+      required:
+        - run_id
+        - total_days
+        - total_epochs
+        - cumulative_loaded_miles
+        - cumulative_empty_miles
+        - overall_empty_ratio
+        - cumulative_gross_revenue
+        - cumulative_cost
+        - cumulative_net_contribution
+        - daily_kpis
+      properties:
+        run_id:
+          type: string
+          example: "SIM_7D_PROD"
+        total_days:
+          type: integer
+          example: 7
+        total_epochs:
+          type: integer
+          example: 7
+        cumulative_loaded_miles:
+          type: number
+          format: double
+          example: 87500.0
+        cumulative_empty_miles:
+          type: number
+          format: double
+          example: 13125.0
+        overall_empty_ratio:
+          type: number
+          format: double
+          example: 0.1304
+        cumulative_gross_revenue:
+          type: number
+          format: double
+          example: 297500.00
+        cumulative_cost:
+          type: number
+          format: double
+          example: 170450.00
+        cumulative_net_contribution:
+          type: number
+          format: double
+          example: 127050.00
+        daily_kpis:
+          type: array
+          items:
+            $ref: '#/components/schemas/DailyKPISnapshotDTO'
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - version
+        - uptime_seconds
+      properties:
+        status:
+          type: string
+          example: "OK"
+        version:
+          type: string
+          example: "1.0.0"
+        uptime_seconds:
+          type: number
+          format: double
+          example: 3600.0
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: "INVALID_REQUEST"
+        message:
+          type: string
+          example: "matrix dimension mismatch"

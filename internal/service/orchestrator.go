@@ -14,8 +14,9 @@ import (
 // validating physical feasibility, transitioning immutable MOMDP states, and persisting
 // full decision provenance to the Semantic Journal.
 type OptimizationService[C model.CompetitorScale] struct {
-	journal Journal
-	logger  *slog.Logger
+	journal      Journal
+	logger       *slog.Logger
+	beliefFilter *model.BeliefFilter[C]
 }
 
 // NewOptimizationService initializes a new OptimizationService instance.
@@ -30,6 +31,12 @@ func NewOptimizationService[C model.CompetitorScale](journal Journal, logger *sl
 		journal: journal,
 		logger:  logger,
 	}
+}
+
+// WithBeliefFilter configures an active Bayesian belief filter for competitive market updates.
+func (s *OptimizationService[C]) WithBeliefFilter(filter *model.BeliefFilter[C]) *OptimizationService[C] {
+	s.beliefFilter = filter
+	return s
 }
 
 // Journal returns the active decision journal instance.
@@ -103,7 +110,19 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: resource transition failed: %w", err)
 	}
 
-	// 5. Information State Transition I_{t+1}
+	// 5. Belief State Transition b_{t+1}
+	nextBelief := state.Belief()
+	if s.beliefFilter != nil {
+		obs := model.NewObservation(nextEpoch, newLoads, nil)
+		filtered, err := s.beliefFilter.Filter(state.Belief(), obs, action)
+		if err != nil {
+			logger.WarnContext(ctx, "belief filter update failed, preserving prior belief", slog.String("error", err.Error()))
+		} else {
+			nextBelief = filtered
+		}
+	}
+
+	// 6. Information State Transition I_{t+1}
 	if nextEpoch <= currentEpoch {
 		nextEpoch = currentEpoch + 3600 // Default 1 hour advance if not specified
 	}
@@ -116,8 +135,8 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: info transition failed: %w", err)
 	}
 
-	// 6. Construct Next State S_{t+1}
-	nextState, err := model.NewState(nextResource, nextInfo, state.Belief())
+	// 7. Construct Next State S_{t+1}
+	nextState, err := model.NewState(nextResource, nextInfo, nextBelief)
 	if err != nil {
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: next state construction failed: %w", err)
 	}

@@ -46,9 +46,9 @@ func CalculateTripCost(
 	// 4. Empty-to-home repositioning distance and cost
 	var emptyToHomeMiles float64
 	var emptyToHomeCost float64
-	if driver.CurrentLocation.NodeID != "" && load.Destination.NodeID != "" {
-		// If driver has domicile preference, compute distance from delivery to domicile
-		// For general network drivers, distance from destination back towards origin/domicile
+	if (driver.CurrentLocation.NodeID != "" || driver.CurrentLocation.Lat != 0 || driver.CurrentLocation.Lon != 0) &&
+		(load.Destination.NodeID != "" || load.Destination.Lat != 0 || load.Destination.Lon != 0) {
+		// Compute distance from load delivery location back towards driver domicile / current location
 		emptyToHomeMiles = load.Destination.DistanceMiles(driver.CurrentLocation)
 		emptyToHomeCost = emptyToHomeMiles * cfg.EmptyToHomeRate
 	}

@@ -138,6 +138,30 @@ The expanded state variable collapses:
 $$ S^{ext}_t = (R_t, I_t, b_t = \delta(\Theta_t - \Theta_\emptyset)) \equiv (R_t, I_t) = S_t $$
 This mathematically and numerically recovers the classical, fully observable monopolistic Powell framework, satisfying the degenerate equivalence constraint [1, 2].
 
+### 6.5 Endogenous Observation Censoring, Selection Bias, and Epistemic Uncertainty Inflation
+
+In competitive freight markets, active bid win/loss feedback $Y_{t+1}$ is strictly **endogenous and censored** (selection bias): the carrier only observes win/loss signals on corridors where spot bids $p_t$ were submitted. If unaddressed, corridors without active bidding ("quiet lanes") would experience observational starvation, causing beliefs to go stale or drift into myopic lock-in.
+
+Project Mittens resolves selection bias and observation censoring through four complementary mathematical mechanisms:
+
+1. **Two-Sided Observation Decomposition (Active vs. Passive Signals):**
+   The observation vector $o_{t+1} = (D_{t+1}, Y_{t+1}, \bar{R}^{mkt}_{t+1})$ factors into:
+   - *Endogenous Channel ($Y_{t+1}$):* Binomial win/loss likelihood conditioned on submitted bids. On unbid lanes ($n=0$), the likelihood is uninformative ($P(\text{Wins}=0 \mid \text{Bids}=0, \Theta_t) = 1.0$), injecting zero false bias.
+   - *Passive Exogenous Channel ($D_{t+1}$ and $\bar{R}^{mkt}_{t+1}$):* Shippers continuously broadcast spot load offers across all corridors. The Poisson arrival intensity $\Lambda_\ell \sim \text{Poisson}(\lambda_\ell(\Theta_t))$ and market clearing spot rate distributions provide an uncensored, passive signal of competitor capacity tightness even on lanes where the carrier places zero bids.
+
+2. **Markovian Prior Diffusion (Anti-Staleness via Chapman-Kolmogorov):**
+   In the absence of local observation updates, belief $b_t$ does not remain frozen on an obsolete historical point estimate. Instead, the transition matrix forward-propagates the prior:
+   $$ b_{t+1 \mid t} = b_t T(\Theta_{t+1} \mid \Theta_t, a_t) $$
+   Over unobserved intervals, $b_t$ smoothly and monotonically relaxes toward the market's ergodic stationary distribution $\pi_\infty$, mathematically expanding entropy $H(b_t)$ and reflecting declining certainty.
+
+3. **Spatial Covariance Generalization via Correlated Knowledge Gradient (CKG):**
+   Corridors do not evolve in spatial isolation. The spatial Gaussian Process covariance kernel $\Sigma_{ij} = \sigma_f^2 \exp\left(-\frac{d(r_i, r_j)^2}{2\ell^2}\right) + \sigma_n^2 \delta_{ij}$ propagates observation innovations from active lanes to quiet neighboring corridors, illuminating adjacent dark lanes proportional to their geodesic proximity.
+
+4. **Epistemic Uncertainty Inflation & Active Information Exploration:**
+   As a quiet corridor's epistemic variance $\Sigma_{t, kk}$ inflates under diffusion, the Knowledge Gradient (KG) value-of-information operator:
+   $$ \tilde{\sigma}_k = \frac{\Sigma_t e_k}{\sqrt{\Sigma_{t, kk} + \sigma_\epsilon^2}} $$
+   naturally assigns an **epistemic exploration premium** to exploratory bids in dark corridors, actively steering lookahead tree rollouts (DLAs) to probe and re-illuminate unplayed markets (Powell's exploration-exploitation balance).
+
 ---
 
 ## 7. Package Architecture

@@ -25,6 +25,10 @@ type LAPAssignment struct {
 	TotalWeight float64
 	// MatchCount is the number of successfully matched pairs.
 	MatchCount int
+	// RowDuals provides optimal Dijkstra dual potentials for each row (driver shadow prices).
+	RowDuals []float64
+	// ColDuals provides optimal Dijkstra dual potentials for each column (load shadow prices).
+	ColDuals []float64
 }
 
 // SolveLAP solves the rectangular Linear Assignment Problem (LAP) on an M x N matrix using
@@ -215,10 +219,47 @@ func SolveLAP(matrix [][]float64, maximize bool, allowNegative bool) (LAPAssignm
 		matchCount++
 	}
 
+	rowDuals := make([]float64, rows)
+	colDuals := make([]float64, cols)
+
+	if !transposed {
+		for i := 0; i < rows; i++ {
+			if maximize {
+				rowDuals[i] = -u[i+1]
+			} else {
+				rowDuals[i] = u[i+1]
+			}
+		}
+		for j := 0; j < cols; j++ {
+			if maximize {
+				colDuals[j] = -v[j+1]
+			} else {
+				colDuals[j] = v[j+1]
+			}
+		}
+	} else {
+		for i := 0; i < rows; i++ {
+			if maximize {
+				rowDuals[i] = -v[i+1]
+			} else {
+				rowDuals[i] = v[i+1]
+			}
+		}
+		for j := 0; j < cols; j++ {
+			if maximize {
+				colDuals[j] = -u[j+1]
+			} else {
+				colDuals[j] = u[j+1]
+			}
+		}
+	}
+
 	return LAPAssignment{
 		RowToCol:    rowToCol,
 		ColToRow:    colToRow,
 		TotalWeight: totalWeight,
 		MatchCount:  matchCount,
+		RowDuals:    rowDuals,
+		ColDuals:    colDuals,
 	}, nil
 }

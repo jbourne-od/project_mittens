@@ -214,11 +214,12 @@ All mathematical transition and filtering equations must be accompanied by rigor
 Before claiming that a task is complete, an agent must execute the following sequential command pipeline inside the sandbox:
 
 1.  **Format Code:** Run `gofmt -s -w .` to enforce canonical Go style.
-2.  **Lint Check:** Run `golangci-lint run` (or individual `go vet ./...` checks) to verify static code sanity.
-3.  **Core Tests:** Execute `go test -v ./internal/domain/model/...` and `go test -v ./pkg/math/...` to ensure domain and mathematical models pass.
-4.  **Race Detector:** Run `go test -race -v ./...` to verify concurrent safety.
-5.  **Build Binary:** Execute `go build -o /workspace/scratch/mittens-opt cmd/optimizer/main.go` to ensure compilation is unbroken.
-6.  **Git Diff Inspection:** Run `git diff` to confirm that no unrelated, commented-out, or diagnostic scaffolding remains in the final submission.
+2.  **Lint & Static Analysis:** Run `golangci-lint run` (or individual `go vet ./...` and `staticcheck ./...` checks) to verify static code sanity.
+3.  **Vulnerability Scan:** Run `govulncheck ./...` to ensure zero known vulnerabilities in dependencies.
+4.  **Core Tests:** Execute `go test -v ./internal/domain/model/...` and `go test -v ./pkg/math/...` to ensure domain and mathematical models pass.
+5.  **Race Detector:** Run `go test -race -v ./...` to verify concurrent safety.
+6.  **Build Binary:** Execute `go build ./...` (and `go build -o /workspace/scratch/mittens-opt cmd/optimizer/main.go`) to ensure compilation is unbroken.
+7.  **Git Diff Inspection:** Run `git diff` to confirm that no unrelated, commented-out, or diagnostic scaffolding remains in the final submission.
 
 ---
 

@@ -175,11 +175,11 @@ func TestBipartiteMatcher_DeterministicMatching(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("expected 2 matches, got %d", len(matches))
 	}
-	if matches[0].DriverID != "D-02" || matches[0].LoadID != "L-02" {
-		t.Fatalf("expected D-02 -> L-02, got %s -> %s", matches[0].DriverID, matches[0].LoadID)
+	if matches[0].DriverID != "D-01" || matches[0].LoadID != "L-01" {
+		t.Fatalf("expected D-01 -> L-01, got %s -> %s", matches[0].DriverID, matches[0].LoadID)
 	}
-	if matches[1].DriverID != "D-01" || matches[1].LoadID != "L-01" {
-		t.Fatalf("expected D-01 -> L-01, got %s -> %s", matches[1].DriverID, matches[1].LoadID)
+	if matches[1].DriverID != "D-02" || matches[1].LoadID != "L-02" {
+		t.Fatalf("expected D-02 -> L-02, got %s -> %s", matches[1].DriverID, matches[1].LoadID)
 	}
 	if totalObj != 1300.0 {
 		t.Fatalf("expected total objective 1300, got %f", totalObj)

@@ -294,6 +294,7 @@ func (s *Simulator) EvaluateTripFeasibility(
 
 	// Step 2: Model early arrival dwell at origin if arriving prior to pickupEarliest
 	insertedDwellMin := 0
+	dwellRestMin := 0
 	if !pickupEarliest.IsZero() && pickupArrival.Before(pickupEarliest) {
 		earlyPickupDwell := int(math.Ceil(pickupEarliest.Sub(pickupArrival).Minutes()))
 		if earlyPickupDwell > 0 {
@@ -302,6 +303,7 @@ func (s *Simulator) EvaluateTripFeasibility(
 			if err != nil {
 				return nil, err
 			}
+			dwellRestMin += resDwell.TotalRestMin
 			clocksAfterPickup = resDwell.FinalClocks
 		}
 	}
@@ -334,6 +336,7 @@ func (s *Simulator) EvaluateTripFeasibility(
 			if err != nil {
 				return nil, err
 			}
+			dwellRestMin += resDwell.TotalRestMin
 			clocksAfterDelivery = resDwell.FinalClocks
 		}
 	}
@@ -346,7 +349,7 @@ func (s *Simulator) EvaluateTripFeasibility(
 	unloadingEnd := resUnloading.FinalClocks.Now()
 
 	totalDuration := int(math.Ceil(unloadingEnd.Sub(initialClocks.Now()).Minutes()))
-	totalInsertedRest := (res1.TotalRestMin + resLoading.TotalRestMin + resLinehaul.TotalRestMin + resUnloading.TotalRestMin)
+	totalInsertedRest := (res1.TotalRestMin + resLoading.TotalRestMin + resLinehaul.TotalRestMin + resUnloading.TotalRestMin + dwellRestMin)
 
 	result := &TripFeasibilityResult{
 		IsFeasible:           true,

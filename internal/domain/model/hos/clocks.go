@@ -305,9 +305,9 @@ func (c *DriverClocks) ApplyOffDuty(durationMin int, isSleeper bool, specs Polic
 		next.consecutiveDrivingMin = 0
 	}
 
-	// Off-duty time pauses the shift countdown only during a qualifying split break;
-	// otherwise ordinary non-qualifying off-duty time continues to count against the 14-hour consecutive window.
-	if !next.hasPendingSplit {
+	// Off-duty time pauses the shift countdown only during a qualifying split break (>= 2h);
+	// otherwise ordinary non-qualifying short off-duty time continues to count against the 14-hour consecutive window.
+	if !(isLongSleeper || isShortBreak) {
 		next.remainingShiftMin = max(0, next.remainingShiftMin-durationMin)
 	}
 

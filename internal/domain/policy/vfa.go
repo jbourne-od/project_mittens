@@ -3,9 +3,11 @@ package policy
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/feasibility"
+	"github.com/optimaldynamics/project-mittens/pkg/logging"
 )
 
 // VFATable stores an immutable map of post-decision state marginal values indexed by geographic region.
@@ -73,6 +75,7 @@ type VFAPolicy[C model.CompetitorScale] struct {
 	filter        *feasibility.ConcurrentFilter
 	matcher       *BipartiteMatcher
 	regionManager *model.RegionManager
+	logger        *slog.Logger
 }
 
 // NewVFAPolicy constructs a new VFAPolicy.
@@ -100,7 +103,16 @@ func NewVFAPolicy[C model.CompetitorScale](
 		filter:        feasibility.NewConcurrentFilter(),
 		matcher:       NewBipartiteMatcher(),
 		regionManager: rm,
+		logger:        logging.NewNop(),
 	}
+}
+
+// WithLogger sets the structured logger for this policy instance.
+func (p *VFAPolicy[C]) WithLogger(logger *slog.Logger) *VFAPolicy[C] {
+	if logger != nil {
+		p.logger = logger
+	}
+	return p
 }
 
 // Name returns the descriptive name of the VFA policy.
@@ -129,15 +141,26 @@ func (p *VFAPolicy[C]) Evaluate(
 		return nil, DecisionProvenance{}, fmt.Errorf("vfa: cannot evaluate nil state")
 	}
 
+	logger := logging.FromContext(ctx, p.logger)
+
 	res := state.Resource()
 	drivers := res.Drivers()
 	loads := res.Loads()
 
 	if len(drivers) == 0 || len(loads) == 0 {
+		logger.DebugContext(ctx, "vfa evaluation skipped: empty drivers or loads",
+			slog.Int("driver_count", len(drivers)),
+			slog.Int("load_count", len(loads)),
+		)
 		return model.NewAction(nil, nil), DecisionProvenance{
 			PolicyName: p.Name(),
 		}, nil
 	}
+
+	logger.DebugContext(ctx, "vfa starting candidate filtering",
+		slog.Int("driver_count", len(drivers)),
+		slog.Int("load_count", len(loads)),
+	)
 
 	// 1. Generate feasible candidate arcs concurrently
 	filterCfg := feasibility.FilterConfig{
@@ -145,8 +168,13 @@ func (p *VFAPolicy[C]) Evaluate(
 	}
 	arcs, err := p.filter.FilterCandidates(ctx, drivers, loads, filterCfg)
 	if err != nil {
+		logger.ErrorContext(ctx, "vfa candidate filtering failed", slog.String("error", err.Error()))
 		return nil, DecisionProvenance{}, fmt.Errorf("vfa: candidate filtering failed: %w", err)
 	}
+
+	logger.DebugContext(ctx, "vfa candidate filtering complete",
+		slog.Int("feasible_arcs", len(arcs)),
+	)
 
 	// 2. Score all candidate arcs using contribution + post-decision state value
 	evals := make([]CandidateEvaluation, len(arcs))
@@ -175,6 +203,14 @@ func (p *VFAPolicy[C]) Evaluate(
 	// 3. Solve 1-to-1 matching via deterministic bipartite matcher
 	epoch := drivers[0].AvailableEpoch
 	matches, sortedEvals, totalObj, totalNetContrib := p.matcher.SolveMatching(evals, epoch, false)
+
+	logger.InfoContext(ctx, "vfa optimization completed",
+		slog.String("policy", p.Name()),
+		slog.Int("candidates", len(evals)),
+		slog.Int("matches", len(matches)),
+		slog.Float64("total_objective", totalObj),
+		slog.Float64("net_contribution", totalNetContrib),
+	)
 
 	// 4. Construct Action and DecisionProvenance
 	action := model.NewAction(matches, nil)

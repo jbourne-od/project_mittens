@@ -1,8 +1,10 @@
 package policy_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/feasibility"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
+	"github.com/optimaldynamics/project-mittens/pkg/logging"
 )
 
 func TestCalculateTripCost(t *testing.T) {
@@ -349,6 +352,78 @@ func TestPolicy_ConcurrentParallelEvaluations(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestCFAPolicy_StructuredLogging(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logging.New(logging.Config{
+		Level:  logging.LevelDebug,
+		Format: logging.FormatJSON,
+		Output: &buf,
+	})
+
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+	startEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
+
+	drivers := []model.Driver{
+		{ID: "D-01", CurrentLocation: locChi, AvailableEpoch: startEpoch, Equipment: model.Equipment{Type: model.EquipDryVan}},
+	}
+	loads := []model.Load{
+		{
+			ID:                  "L-01",
+			Origin:              locChi,
+			Destination:         locAtl,
+			RequiredEquipment:   model.EquipDryVan,
+			Revenue:             3000.0,
+			PickupEarliestEpoch: startEpoch,
+			PickupLatestEpoch:   startEpoch + 36000,
+			DeliveryLatestEpoch: startEpoch + 120000,
+		},
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, err := model.NewInformationState(startEpoch, 1.0, 2.50, 0)
+	if err != nil {
+		t.Fatalf("NewInformationState failed: %v", err)
+	}
+	belief := model.NewMonopolisticBelief()
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	cfa := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		model.DefaultFeasibilityConfig(),
+		nil,
+	).WithLogger(logger)
+
+	ctx := logging.WithContextData(context.Background(), logging.ContextData{
+		OptimizationRunID: "RUN-OPT-001",
+		BatchEpoch:        startEpoch,
+		PolicyClass:       "CFA",
+	})
+
+	action, _, err := cfa.Evaluate(ctx, state)
+	if err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
+	if action.MatchCount() != 1 {
+		t.Fatalf("expected 1 match, got %d", action.MatchCount())
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, `"msg":"cfa starting candidate filtering"`) {
+		t.Fatalf("expected candidate filtering debug log, got: %s", logs)
+	}
+	if !strings.Contains(logs, `"msg":"cfa optimization completed"`) {
+		t.Fatalf("expected optimization completed info log, got: %s", logs)
+	}
+	if !strings.Contains(logs, `"run_id":"RUN-OPT-001"`) {
+		t.Fatalf("expected run_id context in logs, got: %s", logs)
+	}
 }
 
 func CandidateEvaluationFixture(fixtures []struct {

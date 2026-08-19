@@ -3,9 +3,11 @@ package policy
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/feasibility"
+	"github.com/optimaldynamics/project-mittens/pkg/logging"
 )
 
 // CFAParameters holds the tunable parameter vector theta for the Cost Function Approximation policy.
@@ -64,6 +66,7 @@ type CFAPolicy[C model.CompetitorScale] struct {
 	filter        *feasibility.ConcurrentFilter
 	matcher       *BipartiteMatcher
 	regionManager *model.RegionManager
+	logger        *slog.Logger
 }
 
 // NewCFAPolicy constructs a new CFAPolicy.
@@ -83,7 +86,16 @@ func NewCFAPolicy[C model.CompetitorScale](
 		filter:        feasibility.NewConcurrentFilter(),
 		matcher:       NewBipartiteMatcher(),
 		regionManager: rm,
+		logger:        logging.NewNop(),
 	}
+}
+
+// WithLogger sets the structured logger for this policy instance.
+func (p *CFAPolicy[C]) WithLogger(logger *slog.Logger) *CFAPolicy[C] {
+	if logger != nil {
+		p.logger = logger
+	}
+	return p
 }
 
 // Name returns the descriptive name of the CFA policy.
@@ -110,16 +122,27 @@ func (p *CFAPolicy[C]) Evaluate(
 		return nil, DecisionProvenance{}, fmt.Errorf("cfa: cannot evaluate nil state")
 	}
 
+	logger := logging.FromContext(ctx, p.logger)
+
 	res := state.Resource()
 	drivers := res.Drivers()
 	loads := res.Loads()
 
 	if len(drivers) == 0 || len(loads) == 0 {
+		logger.DebugContext(ctx, "cfa evaluation skipped: empty drivers or loads",
+			slog.Int("driver_count", len(drivers)),
+			slog.Int("load_count", len(loads)),
+		)
 		return model.NewAction(nil, nil), DecisionProvenance{
 			PolicyName:      p.Name(),
 			ThetaParameters: p.params.ToSlice(),
 		}, nil
 	}
+
+	logger.DebugContext(ctx, "cfa starting candidate filtering",
+		slog.Int("driver_count", len(drivers)),
+		slog.Int("load_count", len(loads)),
+	)
 
 	// 1. Generate feasible candidate arcs concurrently
 	filterCfg := feasibility.FilterConfig{
@@ -127,8 +150,13 @@ func (p *CFAPolicy[C]) Evaluate(
 	}
 	arcs, err := p.filter.FilterCandidates(ctx, drivers, loads, filterCfg)
 	if err != nil {
+		logger.ErrorContext(ctx, "cfa candidate filtering failed", slog.String("error", err.Error()))
 		return nil, DecisionProvenance{}, fmt.Errorf("cfa: candidate filtering failed: %w", err)
 	}
+
+	logger.DebugContext(ctx, "cfa candidate filtering complete",
+		slog.Int("feasible_arcs", len(arcs)),
+	)
 
 	// 2. Score all candidate arcs under parametric cost function
 	evals := make([]CandidateEvaluation, len(arcs))
@@ -168,6 +196,14 @@ func (p *CFAPolicy[C]) Evaluate(
 	// 3. Solve 1-to-1 matching via deterministic bipartite matcher
 	epoch := drivers[0].AvailableEpoch
 	matches, sortedEvals, totalObj, totalNetContrib := p.matcher.SolveMatching(evals, epoch, false)
+
+	logger.InfoContext(ctx, "cfa optimization completed",
+		slog.String("policy", p.Name()),
+		slog.Int("candidates", len(evals)),
+		slog.Int("matches", len(matches)),
+		slog.Float64("total_objective", totalObj),
+		slog.Float64("net_contribution", totalNetContrib),
+	)
 
 	// 4. Construct Action and DecisionProvenance
 	action := model.NewAction(matches, nil)

@@ -146,12 +146,21 @@ func OptimizeSPSA(ctx context.Context, cfg SPSAConfig, initialTheta []float64, l
 		projectTheta(thetaPlus, cfg.LowerBounds, cfg.UpperBounds)
 		projectTheta(thetaMinus, cfg.LowerBounds, cfg.UpperBounds)
 
-		// Evaluate objective at perturbed points
-		yPlus, err := loss(ctx, thetaPlus)
+		// Evaluate objective at perturbed points with panic recovery
+		safeLoss := func(ctx context.Context, point []float64) (y float64, err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("loss evaluation panicked: %v", r)
+				}
+			}()
+			return loss(ctx, point)
+		}
+
+		yPlus, err := safeLoss(ctx, thetaPlus)
 		if err != nil {
 			return bestTheta, bestLoss, fmt.Errorf("pkg/math: SPSA evaluation failed at step %d (+): %w", k, err)
 		}
-		yMinus, err := loss(ctx, thetaMinus)
+		yMinus, err := safeLoss(ctx, thetaMinus)
 		if err != nil {
 			return bestTheta, bestLoss, fmt.Errorf("pkg/math: SPSA evaluation failed at step %d (-): %w", k, err)
 		}

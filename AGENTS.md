@@ -221,6 +221,15 @@ Before claiming that a task is complete, an agent must execute the following seq
 6.  **Build Binary:** Execute `go build ./...` (and `go build -o /workspace/scratch/mittens-opt cmd/optimizer/main.go`) to ensure compilation is unbroken.
 7.  **Git Diff Inspection:** Run `git diff` to confirm that no unrelated, commented-out, or diagnostic scaffolding remains in the final submission.
 
+### 7.4 The Mandatory Adversarial PR Review Gate
+Before any Pull Request is opened or marked ready for human review, the branch must pass an automated adversarial review gate.
+
+*   **Role & Separation of Concerns:** An independent, read-only subagent (`adversarial_reviewer`) is spawned specifically to red-team the diff. The adversarial agent has **zero write permissions**; it cannot edit code or write fixes. Its sole mandate is to find flaws, Inviolate violations, floating-point drift, immutability leaks, and concurrency hazards.
+*   **Gate Verdict:** The adversarial reviewer emits a structured report with a mandatory gate verdict:
+    - **`REJECT`:** Any Inviolate breach, data race risk, uncompensated floating-point drift, missing boundary tests, or undocumented non-obvious Go idiom halts the PR pipeline. The primary agent must diagnose the root cause, apply fixes, and re-run the gate.
+    - **`APPROVE`:** Granted only when the diff demonstrates complete mathematical rigor, clean architecture adherence, and zero race conditions.
+*   **No Bypass:** Under no circumstances may an agent open a PR or declare a task complete while an adversarial review verdict remains `REJECT`.
+
 ---
 
 ## 8. Glossary of Developer Invariants

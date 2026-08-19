@@ -17,6 +17,8 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
 	"github.com/optimaldynamics/project-mittens/internal/service/dispatch"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // RollingHorizonConfig encapsulates settings for multi-day rolling horizon carrier operations.
@@ -158,6 +160,10 @@ func (r *RollingHorizonRunner[C]) Run(
 	totalRevenue := 0.0
 	totalCost := 0.0
 	totalNet := 0.0
+
+	ctx, span := telemetry.StartSpan(ctx, "RollingHorizon.Run")
+	defer span.End()
+	span.SetAttributes(telemetry.SimulationSpanAttributes(cfg.RunID, cfg.HorizonDays, 0)...)
 
 	logger := logging.FromContext(ctx, r.logger)
 	logger.InfoContext(ctx, "starting rolling horizon simulation",
@@ -320,6 +326,8 @@ func (r *RollingHorizonRunner[C]) Run(
 		TotalOperatingCost:   totalCost,
 		TotalNetContribution: totalNet,
 	}
+
+	span.SetAttributes(attribute.Int("simulation.epoch_count", epochCount))
 
 	logger.InfoContext(ctx, "rolling horizon simulation complete",
 		slog.String("run_id", cfg.RunID),

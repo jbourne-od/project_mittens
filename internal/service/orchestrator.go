@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // OptimizationService coordinates single-epoch carrier optimization batches,
@@ -64,25 +67,40 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: cannot optimize with nil policy")
 	}
 
+	startTime := time.Now()
+	ctx, span := telemetry.StartSpan(ctx, "Optimizer.OptimizeEpoch")
+	defer span.End()
+
+	driverCount := len(state.Resource().Drivers())
+	loadCount := len(state.Resource().Loads())
+	competitorScale := 0
+	if state.Belief() != nil {
+		competitorScale = state.Belief().Scale().CompetitorDimension()
+	}
+	span.SetAttributes(telemetry.OptimizationSpanAttributes(pol.Name(), driverCount, loadCount, competitorScale)...)
+
 	logger := logging.FromContext(ctx, s.logger)
 	currentEpoch := state.Information().Epoch()
 
 	logger.DebugContext(ctx, "starting epoch optimization",
 		slog.Int64("epoch", currentEpoch),
 		slog.String("policy", pol.Name()),
-		slog.Int("drivers", len(state.Resource().Drivers())),
-		slog.Int("loads", len(state.Resource().Loads())),
+		slog.Int("drivers", driverCount),
+		slog.Int("loads", loadCount),
 	)
 
 	// 1. Evaluate Policy
 	action, prov, err := pol.Evaluate(ctx, state)
 	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
 		logger.ErrorContext(ctx, "policy evaluation failed", slog.String("error", err.Error()))
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: policy evaluation failed: %w", err)
 	}
 
 	// 2. Validate Action Physical Feasibility
 	if err := action.ValidateFeasibility(state.Resource()); err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		telemetry.RecordInvariantFailure(ctx, "ActionFeasibilityViolation")
 		logger.ErrorContext(ctx, "action feasibility validation failed", slog.String("error", err.Error()))
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: action validation failed: %w", err)
 	}
@@ -106,6 +124,7 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 	// 4. Physical Resource Transition R_{t+1}
 	nextResource, err := state.Resource().Transition(action.Matches(), newLoads)
 	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
 		logger.ErrorContext(ctx, "resource state transition failed", slog.String("error", err.Error()))
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: resource transition failed: %w", err)
 	}
@@ -132,14 +151,25 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 
 	nextInfo, err := state.Information().Transition(nextEpoch, spotRate, fuelPrice, realizedCount)
 	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: info transition failed: %w", err)
 	}
 
 	// 7. Construct Next State S_{t+1}
 	nextState, err := model.NewState(nextResource, nextInfo, nextBelief)
 	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: next state construction failed: %w", err)
 	}
+
+	durationSec := time.Since(startTime).Seconds()
+	telemetry.RecordOptimizationDuration(ctx, durationSec, pol.Name(), "success")
+	telemetry.RecordMatchesProduced(ctx, int64(action.MatchCount()), pol.Name())
+
+	span.SetAttributes(
+		attribute.Int("optimization.match_count", action.MatchCount()),
+		attribute.Float64("optimization.net_contribution", prov.TotalNetContribution),
+	)
 
 	logger.InfoContext(ctx, "epoch optimization completed",
 		slog.Int64("epoch", currentEpoch),

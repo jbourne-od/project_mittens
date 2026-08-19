@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
 )
 
 // ServerConfig configures the HTTP REST API server.
@@ -62,7 +63,7 @@ func NewServer(cfg ServerConfig) *Server {
 
 	// System Routes
 	r.Get("/healthz", h.HandleHealth)
-	r.Get("/metrics", h.HandleMetrics)
+	r.Handle("/metrics", telemetry.GlobalProvider().PrometheusHandler())
 
 	// API v1 Routes
 	r.Route("/api/v1", func(r chi.Router) {

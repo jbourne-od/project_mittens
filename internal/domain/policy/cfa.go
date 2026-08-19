@@ -8,6 +8,7 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/feasibility"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
 )
 
 // CFAParameters holds the tunable parameter vector theta for the Cost Function Approximation policy.
@@ -122,11 +123,19 @@ func (p *CFAPolicy[C]) Evaluate(
 		return nil, DecisionProvenance{}, fmt.Errorf("cfa: cannot evaluate nil state")
 	}
 
+	ctx, span := telemetry.StartSpan(ctx, "Policy.CFA.Evaluate")
+	defer span.End()
+
 	logger := logging.FromContext(ctx, p.logger)
 
 	res := state.Resource()
 	drivers := res.Drivers()
 	loads := res.Loads()
+	competitorScale := 0
+	if state.Belief() != nil {
+		competitorScale = state.Belief().Scale().CompetitorDimension()
+	}
+	span.SetAttributes(telemetry.OptimizationSpanAttributes("CFA", len(drivers), len(loads), competitorScale)...)
 
 	if len(drivers) == 0 || len(loads) == 0 {
 		logger.DebugContext(ctx, "cfa evaluation skipped: empty drivers or loads",

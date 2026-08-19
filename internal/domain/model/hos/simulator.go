@@ -141,41 +141,92 @@ func (s *Simulator) Simulate(initialClocks *DriverClocks, events []Event, specs 
 			totalRest += ev.DurationMin
 
 		case EventHold:
-			// Hold default is on-duty waiting unless specified
-			start := clocks.Now()
-			nextClocks, err := clocks.ApplyOnDutyNotDriving(ev.DurationMin, specs)
-			if err != nil {
-				return nil, err
+			remDuration := ev.DurationMin
+			for remDuration > 0 {
+				// If remaining hold is >= DailyResetMin (10h), driver takes off-duty rest while waiting
+				if remDuration >= specs.DailyResetMin && autoInsertRests {
+					resetDur := specs.DailyResetMin
+					if remDuration >= specs.WeeklyResetMin && clocks.RemainingCycleMin() <= 0 {
+						resetDur = specs.WeeklyResetMin
+					}
+					start := clocks.Now()
+					nextClocks, err := clocks.ApplyOffDuty(resetDur, true, specs)
+					if err != nil {
+						return nil, err
+					}
+					timeline = append(timeline, TimelineEntry{
+						StartTime:      start,
+						EndTime:        nextClocks.Now(),
+						Event:          RestEvent(resetDur, true, ev.LocationID),
+						ClocksSnapshot: *nextClocks,
+					})
+					clocks = nextClocks
+					remDuration -= resetDur
+					totalDuration += resetDur
+					totalRest += resetDur
+					continue
+				}
+
+				availDuty := min(clocks.RemainingShiftMin(), clocks.RemainingCycleMin())
+				if availDuty <= 0 {
+					if !autoInsertRests {
+						return nil, fmt.Errorf("%w: driver hit HOS limit during hold at %v", ErrHOSViolation, clocks.Now())
+					}
+					clocks, timeline = s.insertRequiredReset(clocks, specs, ev.LocationID, &timeline, &totalDuration, &totalRest)
+					continue
+				}
+
+				holdChunk := min(remDuration, availDuty)
+				start := clocks.Now()
+				nextClocks, err := clocks.ApplyOnDutyNotDriving(holdChunk, specs)
+				if err != nil {
+					return nil, err
+				}
+
+				timeline = append(timeline, TimelineEntry{
+					StartTime:      start,
+					EndTime:        nextClocks.Now(),
+					Event:          HoldEvent(holdChunk, ev.LocationID),
+					ClocksSnapshot: *nextClocks,
+				})
+
+				clocks = nextClocks
+				remDuration -= holdChunk
+				totalDuration += holdChunk
+				totalDuty += holdChunk
 			}
-
-			timeline = append(timeline, TimelineEntry{
-				StartTime:      start,
-				EndTime:        nextClocks.Now(),
-				Event:          ev,
-				ClocksSnapshot: *nextClocks,
-			})
-
-			clocks = nextClocks
-			totalDuration += ev.DurationMin
-			totalDuty += ev.DurationMin
 
 		case EventBorderCrossing:
-			start := clocks.Now()
-			nextClocks, err := clocks.ApplyOnDutyNotDriving(ev.DurationMin, specs)
-			if err != nil {
-				return nil, err
+			remDuration := ev.DurationMin
+			for remDuration > 0 {
+				availDuty := min(clocks.RemainingShiftMin(), clocks.RemainingCycleMin())
+				if availDuty <= 0 {
+					if !autoInsertRests {
+						return nil, fmt.Errorf("%w: driver hit HOS limit during border crossing at %v", ErrHOSViolation, clocks.Now())
+					}
+					clocks, timeline = s.insertRequiredReset(clocks, specs, ev.LocationID, &timeline, &totalDuration, &totalRest)
+					continue
+				}
+
+				dutyChunk := min(remDuration, availDuty)
+				start := clocks.Now()
+				nextClocks, err := clocks.ApplyOnDutyNotDriving(dutyChunk, specs)
+				if err != nil {
+					return nil, err
+				}
+
+				timeline = append(timeline, TimelineEntry{
+					StartTime:      start,
+					EndTime:        nextClocks.Now(),
+					Event:          BorderCrossingEvent(dutyChunk, ev.LocationID),
+					ClocksSnapshot: *nextClocks,
+				})
+
+				clocks = nextClocks
+				remDuration -= dutyChunk
+				totalDuration += dutyChunk
+				totalDuty += dutyChunk
 			}
-
-			timeline = append(timeline, TimelineEntry{
-				StartTime:      start,
-				EndTime:        nextClocks.Now(),
-				Event:          ev,
-				ClocksSnapshot: *nextClocks,
-			})
-
-			clocks = nextClocks
-			totalDuration += ev.DurationMin
-			totalDuty += ev.DurationMin
 		}
 	}
 

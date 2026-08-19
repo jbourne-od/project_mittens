@@ -296,10 +296,20 @@ func (rs *ResourceState) Transition(matches []DriverLoadMatch, newLoads []Load) 
 
 		// Advance clocks if present
 		if d.Clocks != nil {
-			transitMinutes := int(transitHours * 60.0)
-			updatedClocks, err := d.Clocks.ApplyDrive(transitMinutes, d.PolicySpecs)
-			if err == nil {
-				d.Clocks = updatedClocks
+			sim := hos.NewSimulator()
+			deadheadMiles := d.CurrentLocation.DistanceMiles(load.Origin)
+			loadedMiles := load.Origin.DistanceMiles(load.Destination)
+			dhMin := int(math.Ceil(deadheadMiles / 50.0 * 60.0))
+			lhMin := int(math.Ceil(loadedMiles / 50.0 * 60.0))
+			events := []hos.Event{
+				hos.DriveEvent(dhMin, deadheadMiles, "DEADHEAD"),
+				hos.LoadingEvent(60, "ORIGIN"),
+				hos.DriveEvent(lhMin, loadedMiles, "LINEHAUL"),
+				hos.UnloadingEvent(60, "DESTINATION"),
+			}
+			simRes, err := sim.Simulate(d.Clocks, events, d.PolicySpecs, true)
+			if err == nil && simRes != nil && simRes.FinalClocks != nil {
+				d.Clocks = simRes.FinalClocks
 			}
 		}
 

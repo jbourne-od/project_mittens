@@ -14,6 +14,11 @@ type CandidateEvaluation struct {
 	VFAValue           float64
 	TotalScore         float64 // Final policy objective score
 	PostDecisionRegion string
+	DeadheadMiles      float64
+	LoadedMiles        float64
+	InsertedDwellMin   int
+	InsertedRestMin    int
+	TotalTripMin       int
 	IsAssigned         bool
 }
 

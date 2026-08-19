@@ -41,6 +41,16 @@ func NewBipartiteMatcherWithAlgorithm(alg MatchingAlgorithm) *BipartiteMatcher {
 	}
 }
 
+// MatchingSolution captures the complete primal matching assignments and optimal dual shadow prices.
+type MatchingSolution struct {
+	Matches              []model.DriverLoadMatch
+	Evaluations          []CandidateEvaluation
+	TotalObjective       float64
+	TotalNetContribution float64
+	DriverDualValues     map[string]float64 // u_d (driver opportunity value / shadow price)
+	LoadDualValues       map[string]float64 // v_l (load opportunity value / shadow price)
+}
+
 // SolveMatching performs a deterministic bipartite assignment over candidate evaluations.
 //
 // In accordance with Principle 1 (Absolute Mathematical Rigor) and Principle 2 (Deterministic Reproducibility):
@@ -53,15 +63,36 @@ func (m *BipartiteMatcher) SolveMatching(
 	epoch int64,
 	allowNegative bool,
 ) ([]model.DriverLoadMatch, []CandidateEvaluation, float64, float64) {
+	sol := m.SolveMatchingDetailed(evals, epoch, allowNegative)
+	return sol.Matches, sol.Evaluations, sol.TotalObjective, sol.TotalNetContribution
+}
+
+// SolveMatchingDetailed performs assignment and returns full primal matches along with dual shadow prices.
+func (m *BipartiteMatcher) SolveMatchingDetailed(
+	evals []CandidateEvaluation,
+	epoch int64,
+	allowNegative bool,
+) MatchingSolution {
 	if len(evals) == 0 {
-		return nil, nil, 0, 0
+		return MatchingSolution{
+			DriverDualValues: make(map[string]float64),
+			LoadDualValues:   make(map[string]float64),
+		}
 	}
 
 	if m.algorithm == AlgorithmGreedy {
-		return m.solveGreedy(evals, epoch, allowNegative)
+		matches, sortedEvals, totalObj, totalNet := m.solveGreedy(evals, epoch, allowNegative)
+		return MatchingSolution{
+			Matches:              matches,
+			Evaluations:          sortedEvals,
+			TotalObjective:       totalObj,
+			TotalNetContribution: totalNet,
+			DriverDualValues:     make(map[string]float64),
+			LoadDualValues:       make(map[string]float64),
+		}
 	}
 
-	return m.solveExactLAP(evals, epoch, allowNegative)
+	return m.solveExactLAPDetailed(evals, epoch, allowNegative)
 }
 
 // solveGreedy performs score-sorted greedy assignment.
@@ -120,12 +151,12 @@ func (m *BipartiteMatcher) solveGreedy(
 	return matches, sorted, totalObjective, totalNetContrib
 }
 
-// solveExactLAP builds the bipartite payout matrix and solves the exact Linear Assignment Problem.
-func (m *BipartiteMatcher) solveExactLAP(
+// solveExactLAPDetailed builds the bipartite payout matrix and solves the exact Linear Assignment Problem.
+func (m *BipartiteMatcher) solveExactLAPDetailed(
 	evals []CandidateEvaluation,
 	epoch int64,
 	allowNegative bool,
-) ([]model.DriverLoadMatch, []CandidateEvaluation, float64, float64) {
+) MatchingSolution {
 	// 1. Collect distinct driver IDs and load IDs canonicalized in sorted order (Principle 2)
 	driverSet := make(map[string]bool)
 	loadSet := make(map[string]bool)
@@ -184,13 +215,27 @@ func (m *BipartiteMatcher) solveExactLAP(
 		panic(fmt.Sprintf("domain/policy: exact LAP solver failed: %v", err))
 	}
 
-	// 4. Map solution back to CandidateEvaluation slice and Match tuples
+	// 4. Map solution back to CandidateEvaluation slice, Match tuples, and dual values
 	copiedEvals := make([]CandidateEvaluation, len(evals))
 	copy(copiedEvals, evals)
 
 	var matches []model.DriverLoadMatch
 	var totalObjective float64
 	var totalNetContrib float64
+
+	driverDuals := make(map[string]float64, numDrivers)
+	for r, dID := range driverIDs {
+		if r < len(assignment.RowDuals) {
+			driverDuals[dID] = assignment.RowDuals[r]
+		}
+	}
+
+	loadDuals := make(map[string]float64, numLoads)
+	for c, lID := range loadIDs {
+		if c < len(assignment.ColDuals) {
+			loadDuals[lID] = assignment.ColDuals[c]
+		}
+	}
 
 	for r := 0; r < numDrivers; r++ {
 		c := assignment.RowToCol[r]
@@ -232,5 +277,12 @@ func (m *BipartiteMatcher) solveExactLAP(
 		return matches[i].DriverID < matches[j].DriverID
 	})
 
-	return matches, copiedEvals, totalObjective, totalNetContrib
+	return MatchingSolution{
+		Matches:              matches,
+		Evaluations:          copiedEvals,
+		TotalObjective:       totalObjective,
+		TotalNetContribution: totalNetContrib,
+		DriverDualValues:     driverDuals,
+		LoadDualValues:       loadDuals,
+	}
 }

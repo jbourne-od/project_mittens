@@ -173,3 +173,79 @@ func TestSolveLower(t *testing.T) {
 		t.Fatalf("SolveLower result %v; expected [2, 2]", y)
 	}
 }
+
+func TestTranspose(t *testing.T) {
+	A, err := pkgmath.NewDenseMatrixWithData(2, 3, []float64{
+		1, 2, 3,
+		4, 5, 6,
+	})
+	if err != nil {
+		t.Fatalf("matrix creation failed: %v", err)
+	}
+
+	AT := A.Transpose()
+	if AT.Rows() != 3 || AT.Cols() != 2 {
+		t.Fatalf("expected dimensions (3, 2), got (%d, %d)", AT.Rows(), AT.Cols())
+	}
+
+	expected := []float64{
+		1, 4,
+		2, 5,
+		3, 6,
+	}
+	for i := 0; i < 6; i++ {
+		if AT.Data()[i] != expected[i] {
+			t.Fatalf("AT[%d] = %v; expected %v", i, AT.Data()[i], expected[i])
+		}
+	}
+}
+
+func TestSolveUpper(t *testing.T) {
+	// U = [[2, 3], [0, 4]], y = [8, 8]
+	// x[1] = 8 / 4 = 2
+	// x[0] = (8 - 3*2) / 2 = 2/2 = 1
+	U, _ := pkgmath.NewDenseMatrixWithData(2, 2, []float64{
+		2, 3,
+		0, 4,
+	})
+	y := []float64{8, 8}
+
+	x, err := pkgmath.SolveUpper(U, y)
+	if err != nil {
+		t.Fatalf("SolveUpper failed: %v", err)
+	}
+
+	if math.Abs(x[0]-1.0) > 1e-12 || math.Abs(x[1]-2.0) > 1e-12 {
+		t.Fatalf("SolveUpper result %v; expected [1, 2]", x)
+	}
+}
+
+func TestSolveCholesky(t *testing.T) {
+	// A = [[4, 12, -16], [12, 37, -43], [-16, -43, 98]]
+	// b = [4, 13, 20]
+	// Solve A * x = b -> x = [1, 1, 1] ? Let's check:
+	// A * [1, 1, 1]^T = [4+12-16, 12+37-43, -16-43+98] = [0, 6, 39]
+	// Let b = [0, 6, 39] -> expected x = [1, 1, 1]
+	A, _ := pkgmath.NewDenseMatrixWithData(3, 3, []float64{
+		4, 12, -16,
+		12, 37, -43,
+		-16, -43, 98,
+	})
+	L, err := pkgmath.Cholesky(A)
+	if err != nil {
+		t.Fatalf("Cholesky failed: %v", err)
+	}
+
+	b := []float64{0, 6, 39}
+	x, err := pkgmath.SolveCholesky(L, b)
+	if err != nil {
+		t.Fatalf("SolveCholesky failed: %v", err)
+	}
+
+	expected := []float64{1.0, 1.0, 1.0}
+	for i := 0; i < 3; i++ {
+		if math.Abs(x[i]-expected[i]) > 1e-10 {
+			t.Fatalf("x[%d] = %v; expected %v", i, x[i], expected[i])
+		}
+	}
+}

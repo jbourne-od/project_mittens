@@ -213,6 +213,17 @@ func Cholesky(a *DenseMatrix) (*DenseMatrix, error) {
 	return L, nil
 }
 
+// Transpose returns a newly allocated matrix that is the transpose of m (Inviolate 5).
+func (m *DenseMatrix) Transpose() *DenseMatrix {
+	trans := NewDenseMatrix(m.cols, m.rows)
+	for r := 0; r < m.rows; r++ {
+		for c := 0; c < m.cols; c++ {
+			trans.data[c*m.rows+r] = m.data[r*m.cols+c]
+		}
+	}
+	return trans
+}
+
 // SolveLower solves the lower-triangular linear system L * y = b via forward substitution.
 //
 // Assumes L is an n x n lower-triangular matrix with non-zero diagonal entries.
@@ -240,4 +251,62 @@ func SolveLower(L *DenseMatrix, b []float64) ([]float64, error) {
 	}
 
 	return y, nil
+}
+
+// SolveUpper solves the upper-triangular linear system U * x = y via backward substitution.
+//
+// Assumes U is an n x n upper-triangular matrix with non-zero diagonal entries.
+// Returns an error if dimensions mismatch or if a diagonal entry is zero.
+func SolveUpper(U *DenseMatrix, y []float64) ([]float64, error) {
+	if U.rows != U.cols {
+		return nil, ErrNotSquare
+	}
+	n := U.rows
+	if len(y) != n {
+		return nil, fmt.Errorf("%w: matrix size %d != vector size %d", ErrDimensionMismatch, n, len(y))
+	}
+
+	x := make([]float64, n)
+	for i := n - 1; i >= 0; i-- {
+		sum := 0.0
+		for j := i + 1; j < n; j++ {
+			sum += U.data[i*n+j] * x[j]
+		}
+		diag := U.data[i*n+i]
+		if math.Abs(diag) < 1e-15 {
+			return nil, fmt.Errorf("%w: diagonal at index %d is zero (%e)", ErrSingularMatrix, i, diag)
+		}
+		x[i] = (y[i] - sum) / diag
+	}
+
+	return x, nil
+}
+
+// SolveCholesky solves the symmetric positive-definite linear system A * x = (L * L^T) * x = b.
+//
+// Parameters:
+//   - L: Lower-triangular Cholesky factor of matrix A (i.e. A = L * L^T).
+//   - b: Right-hand side vector.
+//
+// Computes solution x in O(n^2) time via forward substitution L * y = b followed by
+// backward substitution L^T * x = y without inverting A directly.
+func SolveCholesky(L *DenseMatrix, b []float64) ([]float64, error) {
+	if L.rows != L.cols {
+		return nil, ErrNotSquare
+	}
+
+	// 1. Forward substitution: L * y = b
+	y, err := SolveLower(L, b)
+	if err != nil {
+		return nil, fmt.Errorf("pkg/math: SolveCholesky forward solve failed: %w", err)
+	}
+
+	// 2. Backward substitution: L^T * x = y
+	LT := L.Transpose()
+	x, err := SolveUpper(LT, y)
+	if err != nil {
+		return nil, fmt.Errorf("pkg/math: SolveCholesky backward solve failed: %w", err)
+	}
+
+	return x, nil
 }

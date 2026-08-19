@@ -80,3 +80,19 @@ func (s *State[C]) Clone() *State[C] {
 		belief:      s.belief.Clone(),
 	}
 }
+
+// Transition computes the forward physical, macro-informational, and belief-state transition of the joint MOMDP state:
+//
+//	S_{t+1} = (R_{t+1}, I_{t+1}, b_{t+1}) = T(S_t, a_t, o_{t+1})
+func (s *State[C]) Transition(action *Action, newLoads []Load) (*State[C], error) {
+	if action == nil {
+		action = NewAction(nil, nil)
+	}
+
+	nextRes, err := s.resource.Transition(action.Matches(), newLoads)
+	if err != nil {
+		return nil, fmt.Errorf("state: resource transition failed: %w", err)
+	}
+
+	return NewState(nextRes, s.information, s.belief)
+}

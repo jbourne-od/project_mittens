@@ -12,6 +12,7 @@ type CandidateEvaluation struct {
 	CostBreakdown      TripCostBreakdown
 	CFAAdjustment      float64
 	VFAValue           float64
+	DLAValue           float64
 	TotalScore         float64 // Final policy objective score
 	PostDecisionRegion string
 	DeadheadMiles      float64

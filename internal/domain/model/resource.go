@@ -62,6 +62,7 @@ func (l Location) DistanceMiles(other Location) float64 {
 type Driver struct {
 	ID                  string
 	CurrentLocation     Location
+	HomeLocation        Location // Home domicile location for empty-to-home repositioning calculations
 	AvailableEpoch      int64
 	DutyHoursRemaining  float64
 	DriveHoursRemaining float64

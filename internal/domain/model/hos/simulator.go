@@ -143,42 +143,17 @@ func (s *Simulator) Simulate(initialClocks *DriverClocks, events []Event, specs 
 		case EventHold:
 			remDuration := ev.DurationMin
 			for remDuration > 0 {
-				// If remaining hold is >= DailyResetMin (10h), driver takes off-duty rest while waiting
-				if remDuration >= specs.DailyResetMin && autoInsertRests {
-					resetDur := specs.DailyResetMin
+				isReset := remDuration >= specs.DailyResetMin
+				chunk := remDuration
+				if isReset {
+					chunk = specs.DailyResetMin
 					if remDuration >= specs.WeeklyResetMin && clocks.RemainingCycleMin() <= 0 {
-						resetDur = specs.WeeklyResetMin
+						chunk = specs.WeeklyResetMin
 					}
-					start := clocks.Now()
-					nextClocks, err := clocks.ApplyOffDuty(resetDur, true, specs)
-					if err != nil {
-						return nil, err
-					}
-					timeline = append(timeline, TimelineEntry{
-						StartTime:      start,
-						EndTime:        nextClocks.Now(),
-						Event:          RestEvent(resetDur, true, ev.LocationID),
-						ClocksSnapshot: *nextClocks,
-					})
-					clocks = nextClocks
-					remDuration -= resetDur
-					totalDuration += resetDur
-					totalRest += resetDur
-					continue
 				}
 
-				availDuty := min(clocks.RemainingShiftMin(), clocks.RemainingCycleMin())
-				if availDuty <= 0 {
-					if !autoInsertRests {
-						return nil, fmt.Errorf("%w: driver hit HOS limit during hold at %v", ErrHOSViolation, clocks.Now())
-					}
-					clocks, timeline = s.insertRequiredReset(clocks, specs, ev.LocationID, &timeline, &totalDuration, &totalRest)
-					continue
-				}
-
-				holdChunk := min(remDuration, availDuty)
 				start := clocks.Now()
-				nextClocks, err := clocks.ApplyOnDutyNotDriving(holdChunk, specs)
+				nextClocks, err := clocks.ApplyOffDuty(chunk, isReset, specs)
 				if err != nil {
 					return nil, err
 				}
@@ -186,14 +161,14 @@ func (s *Simulator) Simulate(initialClocks *DriverClocks, events []Event, specs 
 				timeline = append(timeline, TimelineEntry{
 					StartTime:      start,
 					EndTime:        nextClocks.Now(),
-					Event:          HoldEvent(holdChunk, ev.LocationID),
+					Event:          HoldEvent(chunk, ev.LocationID),
 					ClocksSnapshot: *nextClocks,
 				})
 
 				clocks = nextClocks
-				remDuration -= holdChunk
-				totalDuration += holdChunk
-				totalDuty += holdChunk
+				remDuration -= chunk
+				totalDuration += chunk
+				totalRest += chunk
 			}
 
 		case EventBorderCrossing:

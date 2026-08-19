@@ -74,6 +74,17 @@ func DefaultCostConfig() CostConfig {
 	}
 }
 
+// Validate verifies that cost parameters are non-negative and finite.
+func (c CostConfig) Validate() error {
+	if c.FixedCostPerLoad < 0 || c.LoadedMileRate < 0 || c.EmptyMileRate < 0 || c.EmptyToHomeRate < 0 {
+		return fmt.Errorf("%w: cost rates must be non-negative", ErrInvalidConfig)
+	}
+	if c.LateDeliveryPerHour < 0 || c.EarlyArrivalPerHour < 0 {
+		return fmt.Errorf("%w: penalty rates must be non-negative", ErrInvalidConfig)
+	}
+	return nil
+}
+
 // FeasibilityConfig governs physical candidate arc generation and pruning thresholds.
 type FeasibilityConfig struct {
 	MaxDeadheadMiles        float64
@@ -82,6 +93,17 @@ type FeasibilityConfig struct {
 	AverageSpeedMPH         float64
 	EarlyArrivalSentinelMin int
 	HOSPolicySpecs          hos.PolicySpecs
+}
+
+// Validate verifies that feasibility thresholds are positive and valid.
+func (f FeasibilityConfig) Validate() error {
+	if f.AverageSpeedMPH <= 0 {
+		return fmt.Errorf("%w: AverageSpeedMPH must be positive", ErrInvalidConfig)
+	}
+	if f.MaxDeadheadMiles < 0 {
+		return fmt.Errorf("%w: MaxDeadheadMiles must be non-negative", ErrInvalidConfig)
+	}
+	return nil
 }
 
 // DefaultFeasibilityConfig provides standard candidate generation thresholds.

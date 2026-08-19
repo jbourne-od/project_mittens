@@ -12,6 +12,7 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/feasibility"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
+	"github.com/optimaldynamics/project-mittens/internal/domain/rules"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
 )
 
@@ -81,6 +82,68 @@ func TestCalculateTripCost(t *testing.T) {
 	}
 
 	expectedTotalCost := 50.0 + 1174.0 + 30.0 + cost.EmptyToHomeCost + 40.0 + 100.0 - 25.0
+	if cost.TotalCost != expectedTotalCost {
+		t.Fatalf("expected total cost %f, got %f", expectedTotalCost, cost.TotalCost)
+	}
+	if cost.NetContribution != 2000.0-expectedTotalCost {
+		t.Fatalf("expected net contribution %f, got %f", 2000.0-expectedTotalCost, cost.NetContribution)
+	}
+}
+
+func TestCalculateTripCostWithRules(t *testing.T) {
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+	startEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
+
+	driver := model.Driver{
+		ID:              "D-01",
+		CurrentLocation: locChi,
+		AvailableEpoch:  startEpoch,
+	}
+
+	load := model.Load{
+		ID:                  "L-01",
+		Origin:              locChi,
+		Destination:         locAtl,
+		Revenue:             2000.0,
+		PickupEarliestEpoch: startEpoch,
+		PickupLatestEpoch:   startEpoch + 14400,
+		DeliveryLatestEpoch: startEpoch + 86400,
+	}
+
+	arc := feasibility.CandidateArc{
+		DriverID:            "D-01",
+		LoadID:              "L-01",
+		DeadheadMiles:       20.0,
+		LoadedMiles:         587.0,
+		InsertedDwellMin:    0,
+		DeliveryArrivalTime: time.Unix(startEpoch+36000, 0).UTC(),
+	}
+
+	costCfg := model.CostConfig{
+		FixedCostPerLoad: 50.0,
+		LoadedMileRate:   2.00,
+		EmptyMileRate:    1.50,
+		EmptyToHomeRate:  0.0,
+	}
+
+	ruleRes := rules.RuleEvaluationResult{
+		Bonus:                200.0, // $200 bonus from business rules
+		LoadedRateMultiplier: 1.10,  // +10% rate multiplier
+		EmptyRateMultiplier:  1.0,
+		FixedCostMultiplier:  1.0,
+	}
+
+	cost := policy.CalculateTripCostWithRules(driver, load, arc, costCfg, ruleRes)
+
+	expectedLoadedCost := 587.0 * 2.00 * 1.10
+	if cost.LoadedCost != expectedLoadedCost {
+		t.Fatalf("expected loaded cost %f, got %f", expectedLoadedCost, cost.LoadedCost)
+	}
+	if cost.DriverBonus != 200.0 {
+		t.Fatalf("expected bonus 200, got %f", cost.DriverBonus)
+	}
+	expectedTotalCost := 50.0 + expectedLoadedCost + 30.0 - 200.0
 	if cost.TotalCost != expectedTotalCost {
 		t.Fatalf("expected total cost %f, got %f", expectedTotalCost, cost.TotalCost)
 	}

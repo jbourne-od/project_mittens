@@ -3,6 +3,7 @@ package policy
 import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/feasibility"
+	"github.com/optimaldynamics/project-mittens/internal/domain/rules"
 )
 
 // TripCostBreakdown provides a granular itemization of all economic revenue, cost,
@@ -70,6 +71,70 @@ func CalculateTripCost(
 		// Bonus for keeping deadhead low relative to loaded revenue miles
 		if arc.LoadedMiles > 0 && arc.DeadheadMiles < 50.0 {
 			driverBonus = 25.0 * cfg.DriverBonusWeight
+		}
+	}
+
+	totalCost := fixedCost + loadedCost + emptyCost + emptyToHomeCost + dwellCost + latePenalty - driverBonus
+	netContribution := revenue - totalCost
+
+	return TripCostBreakdown{
+		Revenue:         revenue,
+		FixedCost:       fixedCost,
+		LoadedCost:      loadedCost,
+		EmptyCost:       emptyCost,
+		EmptyToHomeCost: emptyToHomeCost,
+		DwellCost:       dwellCost,
+		LatePenalty:     latePenalty,
+		DriverBonus:     driverBonus,
+		TotalCost:       totalCost,
+		NetContribution: netContribution,
+	}
+}
+
+// CalculateTripCostWithRules computes the exact financial contribution incorporating business rule mutations.
+func CalculateTripCostWithRules(
+	driver model.Driver,
+	load model.Load,
+	arc feasibility.CandidateArc,
+	cfg model.CostConfig,
+	ruleRes rules.RuleEvaluationResult,
+) TripCostBreakdown {
+	revenue := load.Revenue
+
+	// 1. Fixed dispatch cost with rule multiplier
+	fixedCost := cfg.FixedCostPerLoad * ruleRes.FixedCostMultiplier
+
+	// 2. Linehaul loaded transit cost with rule multiplier
+	loadedCost := arc.LoadedMiles * cfg.LoadedMileRate * ruleRes.LoadedRateMultiplier
+
+	// 3. Empty deadhead repositioning cost with rule multiplier
+	emptyCost := arc.DeadheadMiles * cfg.EmptyMileRate * ruleRes.EmptyRateMultiplier
+
+	// 4. Empty-to-home repositioning distance and cost with rule multiplier
+	var emptyToHomeMiles float64
+	var emptyToHomeCost float64
+	if (driver.CurrentLocation.NodeID != "" || driver.CurrentLocation.Lat != 0 || driver.CurrentLocation.Lon != 0) &&
+		(load.Destination.NodeID != "" || load.Destination.Lat != 0 || load.Destination.Lon != 0) {
+		emptyToHomeMiles = load.Destination.DistanceMiles(driver.CurrentLocation)
+		emptyToHomeCost = emptyToHomeMiles * cfg.EmptyToHomeRate * ruleRes.EmptyToHomeMultiplier
+	}
+
+	// 5. Facility dwell waiting cost
+	dwellHours := float64(arc.InsertedDwellMin) / 60.0
+	dwellCost := dwellHours * cfg.EarlyArrivalPerHour
+
+	// 6. Late delivery appointment penalty
+	var latePenalty float64
+	if load.DeliveryLatestEpoch > 0 && arc.DeliveryArrivalTime.Unix() > load.DeliveryLatestEpoch {
+		lateHours := float64(arc.DeliveryArrivalTime.Unix()-load.DeliveryLatestEpoch) / 3600.0
+		latePenalty = lateHours * cfg.LateDeliveryPerHour
+	}
+
+	// 7. Driver retention bonus + Rule Bonus
+	driverBonus := ruleRes.Bonus
+	if cfg.DriverBonusWeight > 0 {
+		if arc.LoadedMiles > 0 && arc.DeadheadMiles < 50.0 {
+			driverBonus += 25.0 * cfg.DriverBonusWeight
 		}
 	}
 

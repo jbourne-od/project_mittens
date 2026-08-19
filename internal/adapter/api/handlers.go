@@ -13,6 +13,8 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
 	"github.com/optimaldynamics/project-mittens/internal/service"
 	"github.com/optimaldynamics/project-mittens/internal/service/dispatch"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // parseEquipmentType maps incoming equipment strings into domain EquipmentType.
@@ -39,15 +41,23 @@ type ServerState struct {
 
 // Handler provides HTTP request handling methods.
 type Handler struct {
-	state *ServerState
+	state   *ServerState
+	journal service.Journal
 }
 
-// NewHandler initializes a new Handler.
-func NewHandler() *Handler {
+// NewHandler initializes a new Handler with an optional Semantic Journal instance.
+func NewHandler(journal ...service.Journal) *Handler {
+	var j service.Journal
+	if len(journal) > 0 && journal[0] != nil {
+		j = journal[0]
+	} else {
+		j = service.NewMemoryJournal()
+	}
 	return &Handler{
 		state: &ServerState{
 			StartTime: time.Now().UTC(),
 		},
+		journal: j,
 	}
 }
 
@@ -71,34 +81,11 @@ func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleMetrics serves the /metrics Prometheus text endpoint.
-func (h *Handler) HandleMetrics(w http.ResponseWriter, r *http.Request) {
-	uptime := time.Since(h.state.StartTime).Seconds()
-	reqs := h.state.RequestsTotal.Load()
-	opts := h.state.OptimizeCallsTotal.Load()
-	sims := h.state.SimulateCallsTotal.Load()
-
-	metricsText := fmt.Sprintf(`# HELP mittens_requests_total Total number of HTTP requests processed
-# TYPE mittens_requests_total counter
-mittens_requests_total %d
-# HELP mittens_optimize_calls_total Total number of single-epoch optimizations
-# TYPE mittens_optimize_calls_total counter
-mittens_optimize_calls_total %d
-# HELP mittens_simulate_calls_total Total number of rolling simulations
-# TYPE mittens_simulate_calls_total counter
-mittens_simulate_calls_total %d
-# HELP mittens_uptime_seconds Server uptime in seconds
-# TYPE mittens_uptime_seconds gauge
-mittens_uptime_seconds %.2f
-`, reqs, opts, sims, uptime)
-
-	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(metricsText))
-}
-
 // HandleOptimize executes single-epoch optimal fleet matching.
 func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
+	ctx, span := telemetry.StartSpan(r.Context(), "HTTP.POST.api.v1.optimize")
+	defer span.End()
+
 	h.state.RequestsTotal.Add(1)
 	h.state.OptimizeCallsTotal.Add(1)
 
@@ -115,6 +102,8 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "EMPTY_FLEET", "drivers array cannot be empty")
 		return
 	}
+
+	span.SetAttributes(telemetry.OptimizationSpanAttributes(req.PolicyClass, len(req.Drivers), len(req.Loads), req.CompetitorScale)...)
 
 	if req.PolicyClass != "" && strings.ToUpper(req.PolicyClass) != "CFA" {
 		h.writeError(w, http.StatusBadRequest, "UNSUPPORTED_POLICY", fmt.Sprintf("policy class '%s' is not supported via REST; only CFA is currently supported", req.PolicyClass))
@@ -211,7 +200,8 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 		nil,
 	)
 
-	action, prov, err := cfaPol.Evaluate(r.Context(), state)
+	optService := service.NewOptimizationService[model.Monopolistic](h.journal, nil)
+	action, prov, _, err := optService.OptimizeEpoch(ctx, state, cfaPol, req.Epoch+3600, nil)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "OPTIMIZATION_FAILED", err.Error())
 		return
@@ -241,6 +231,9 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 
 // HandleSimulate executes multi-epoch rolling horizon continuous simulation.
 func (h *Handler) HandleSimulate(w http.ResponseWriter, r *http.Request) {
+	ctx, span := telemetry.StartSpan(r.Context(), "HTTP.POST.api.v1.simulate")
+	defer span.End()
+
 	h.state.RequestsTotal.Add(1)
 	h.state.SimulateCallsTotal.Add(1)
 
@@ -259,6 +252,8 @@ func (h *Handler) HandleSimulate(w http.ResponseWriter, r *http.Request) {
 	if req.HorizonDays <= 0 {
 		req.HorizonDays = 7
 	}
+
+	span.SetAttributes(telemetry.SimulationSpanAttributes(req.RunID, req.HorizonDays, 0)...)
 	if req.DecisionStepHours <= 0 {
 		req.DecisionStepHours = 24
 	}
@@ -354,11 +349,13 @@ func (h *Handler) HandleSimulate(w http.ResponseWriter, r *http.Request) {
 		EnableVFALearning: false,
 	}
 
-	report, _, err := simRunner.Run(r.Context(), cfg, state, cfaPol, stream)
+	report, _, err := simRunner.Run(ctx, cfg, state, cfaPol, stream)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "SIMULATION_FAILED", err.Error())
 		return
 	}
+
+	span.SetAttributes(attribute.Int("simulation.epoch_count", report.TotalEpochs))
 
 	dailyKPIs := make([]DailyKPISnapshotDTO, len(report.DailySnapshots))
 	for k, snap := range report.DailySnapshots {

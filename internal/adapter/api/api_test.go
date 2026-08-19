@@ -52,8 +52,8 @@ func TestAPI_HealthAndMetrics(t *testing.T) {
 	_, _ = buf.ReadFrom(mResp.Body)
 	mText := buf.String()
 
-	if !strings.Contains(mText, "mittens_requests_total") {
-		t.Errorf("expected mittens_requests_total in metrics, got: %s", mText)
+	if !strings.Contains(mText, "project-mittens") {
+		t.Errorf("expected project-mittens service_name in Prometheus metrics, got: %s", mText)
 	}
 }
 
@@ -279,5 +279,73 @@ func TestAPI_ServerLifecycle(t *testing.T) {
 
 	if err := srv.Shutdown(ctx); err != nil {
 		t.Fatalf("Shutdown failed: %v", err)
+	}
+}
+
+func TestAPI_SemanticJournalRecording(t *testing.T) {
+	srv := api.NewServer(api.DefaultServerConfig())
+	ts := httptest.NewServer(srv.Router())
+	defer ts.Close()
+
+	reqPayload := api.OptimizeRequest{
+		Epoch:       1700000000,
+		PolicyClass: "CFA",
+		Drivers: []api.DriverDTO{
+			{
+				ID: "D1",
+				CurrentLocation: api.LocationDTO{
+					NodeID: "NYC",
+					Lat:    40.7128,
+					Lon:    -74.0060,
+				},
+				HomeLocation: api.LocationDTO{
+					NodeID: "NYC",
+					Lat:    40.7128,
+					Lon:    -74.0060,
+				},
+				Equipment: api.EquipmentDTO{
+					Type: "DRY_VAN_53",
+				},
+				AvailableEpoch:      1700000000,
+				DriveHoursRemaining: 11.0,
+				DutyHoursRemaining:  14.0,
+			},
+		},
+		Loads: []api.LoadDTO{
+			{
+				ID: "L1",
+				Origin: api.LocationDTO{
+					NodeID: "NYC",
+					Lat:    40.7128,
+					Lon:    -74.0060,
+				},
+				Destination: api.LocationDTO{
+					NodeID: "CHI",
+					Lat:    41.8781,
+					Lon:    -87.6298,
+				},
+				RequiredEquipment:     "DRY_VAN_53",
+				PickupEarliestEpoch:   1700000000,
+				PickupLatestEpoch:     1700003600,
+				DeliveryEarliestEpoch: 1700010000,
+				DeliveryLatestEpoch:   1700080000,
+				Revenue:               2500.0,
+			},
+		},
+	}
+
+	body, err := json.Marshal(reqPayload)
+	if err != nil {
+		t.Fatalf("failed marshaling request: %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/v1/optimize", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /api/v1/optimize failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/feasibility"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
 	pkgmath "github.com/optimaldynamics/project-mittens/pkg/math"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
 )
 
 var (
@@ -310,11 +311,19 @@ func (p *PiecewiseVFAPolicy[C]) Evaluate(
 		return nil, DecisionProvenance{}, fmt.Errorf("vfa_piecewise: cannot evaluate nil state")
 	}
 
+	ctx, span := telemetry.StartSpan(ctx, "Policy.PiecewiseVFA.Evaluate")
+	defer span.End()
+
 	logger := logging.FromContext(ctx, p.logger)
 
 	res := state.Resource()
 	drivers := res.Drivers()
 	loads := res.Loads()
+	competitorScale := 0
+	if state.Belief() != nil {
+		competitorScale = state.Belief().Scale().CompetitorDimension()
+	}
+	span.SetAttributes(telemetry.OptimizationSpanAttributes("VFA_Piecewise", len(drivers), len(loads), competitorScale)...)
 
 	if len(drivers) == 0 || len(loads) == 0 {
 		logger.DebugContext(ctx, "piecewise vfa evaluation skipped: empty drivers or loads",

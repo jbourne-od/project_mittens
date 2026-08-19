@@ -105,6 +105,16 @@ func HoldEvent(durationMin int, locID string) Event {
 	}
 }
 
+// BorderCrossingEvent creates a border crossing customs dwell event.
+func BorderCrossingEvent(durationMin int, locID string) Event {
+	return Event{
+		Type:        EventBorderCrossing,
+		DurationMin: durationMin,
+		LocationID:  locID,
+		Description: "Border Crossing",
+	}
+}
+
 // TimelineEntry records the execution of an individual event within the simulation timeline.
 type TimelineEntry struct {
 	StartTime      time.Time

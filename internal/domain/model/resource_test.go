@@ -130,3 +130,19 @@ func TestResourceState_TransitionErrors(t *testing.T) {
 		t.Fatalf("expected error on duplicate match")
 	}
 }
+
+func TestLocation_DistanceMiles(t *testing.T) {
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+
+	dist := locChi.DistanceMiles(locAtl)
+	// Great-circle distance between Chicago and Atlanta is ~587.3 miles
+	if dist < 580.0 || dist > 595.0 {
+		t.Fatalf("expected Chicago-Atlanta distance ~587.3 miles, got: %f", dist)
+	}
+
+	// Distance to self is 0
+	if selfDist := locChi.DistanceMiles(locChi); selfDist != 0.0 {
+		t.Fatalf("expected distance to self = 0.0, got %f", selfDist)
+	}
+}

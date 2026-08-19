@@ -3,7 +3,10 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
+
+	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
 )
 
 var (
@@ -17,6 +20,10 @@ var (
 	ErrDuplicateMatch = errors.New("domain/model: duplicate driver or load match in action")
 )
 
+// EarthRadiusMiles represents the mean radius of the Earth in statute miles (3958.8 miles)
+// used for great-circle distance calculations matching legacy Java FleetManager geometry.
+const EarthRadiusMiles = 3958.8
+
 // Location represents a physical spatial node in the transportation network.
 type Location struct {
 	NodeID string
@@ -24,7 +31,33 @@ type Location struct {
 	Lon    float64
 }
 
+// DistanceMiles computes the great-circle Haversine distance in statute miles between two network locations.
+func (l Location) DistanceMiles(other Location) float64 {
+	if l.Lat == other.Lat && l.Lon == other.Lon {
+		return 0.0
+	}
+
+	lat1Rad := l.Lat * (math.Pi / 180.0)
+	lon1Rad := l.Lon * (math.Pi / 180.0)
+	lat2Rad := other.Lat * (math.Pi / 180.0)
+	lon2Rad := other.Lon * (math.Pi / 180.0)
+
+	dLat := lat2Rad - lat1Rad
+	dLon := lon2Rad - lon1Rad
+
+	sinDLatHalf := math.Sin(dLat / 2.0)
+	sinDLonHalf := math.Sin(dLon / 2.0)
+
+	a := sinDLatHalf*sinDLatHalf + math.Cos(lat1Rad)*math.Cos(lat2Rad)*sinDLonHalf*sinDLonHalf
+	c := 2.0 * math.Atan2(math.Sqrt(a), math.Sqrt(1.0-a))
+
+	return EarthRadiusMiles * c
+}
+
 // Driver represents a power unit / driver resource asset in the fleet.
+//
+// In accordance with Inviolate 5 (Logical Immutability) and legacy FleetManager DriverAV parity,
+// Driver carries immutable static attributes and dynamic Hours-of-Service regulatory clocks.
 type Driver struct {
 	ID                  string
 	CurrentLocation     Location
@@ -32,6 +65,8 @@ type Driver struct {
 	DutyHoursRemaining  float64
 	DriveHoursRemaining float64
 	AssignedLoadID      string // Empty string indicates the driver is unassigned / idle
+	Clocks              *hos.DriverClocks
+	PolicySpecs         hos.PolicySpecs
 }
 
 // IsIdle returns true if the driver is currently unassigned.

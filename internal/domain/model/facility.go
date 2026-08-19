@@ -94,6 +94,13 @@ func (fs *FacilityStore) Count() int {
 	return len(fs.facilities)
 }
 
+// Facilities returns a deep copy of all facilities in the store.
+func (fs *FacilityStore) Facilities() []Facility {
+	copied := make([]Facility, len(fs.facilities))
+	copy(copied, fs.facilities)
+	return copied
+}
+
 // FindNearest returns the closest facility of the specified type to a given location.
 func (fs *FacilityStore) FindNearest(loc Location, facType FacilityType) (Facility, float64, error) {
 	if len(fs.facilities) == 0 {

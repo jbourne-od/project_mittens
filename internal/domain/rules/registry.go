@@ -72,6 +72,10 @@ func NewRuleRegistry(rules []Rule, logger *slog.Logger) (*RuleRegistry, error) {
 			if issues != nil && issues.Err() != nil {
 				return nil, fmt.Errorf("rules: compile value failed for rule %s: %w", r.ID, issues.Err())
 			}
+			outType := valAST.OutputType()
+			if outType != cel.DoubleType && outType != cel.IntType && outType != cel.DynType && outType != cel.StringType {
+				return nil, fmt.Errorf("rules: value for rule %s must return numeric or string type, got %v", r.ID, outType)
+			}
 			valProg, err = env.Program(valAST)
 			if err != nil {
 				return nil, fmt.Errorf("rules: failed to build value program for rule %s: %w", r.ID, err)

@@ -216,6 +216,18 @@ func TestRules_CompileValidationErrors(t *testing.T) {
 	if _, err := rules.NewRuleRegistry(nonBool, nil); err == nil {
 		t.Errorf("expected compile error on non-bool condition, got nil")
 	}
+
+	// 3. Non-numeric / non-string value return type (e.g. list literal)
+	badValue := []rules.Rule{
+		{
+			ID:           "RULE-BAD-VAL",
+			ConditionCEL: "driver.id == 'D-01'",
+			ValueCEL:     "[1, 2, 3]", // list type instead of numeric/string
+		},
+	}
+	if _, err := rules.NewRuleRegistry(badValue, nil); err == nil {
+		t.Errorf("expected compile error on invalid value type, got nil")
+	}
 }
 
 func TestRules_ConcurrentEvaluationRaceDetector(t *testing.T) {

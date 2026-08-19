@@ -58,16 +58,81 @@ func TestConcurrentFilter_BasicFilteringAndSorting(t *testing.T) {
 		t.Fatalf("FilterCandidates failed: %v", err)
 	}
 
-	if len(arcs) == 0 {
-		t.Fatalf("expected feasible arcs, got 0")
-	}
-
 	// Verify deterministic canonical sorting by DriverID, then LoadID
 	for i := 1; i < len(arcs); i++ {
 		prev := arcs[i-1]
 		curr := arcs[i]
 		if prev.DriverID > curr.DriverID || (prev.DriverID == curr.DriverID && prev.LoadID >= curr.LoadID) {
 			t.Fatalf("candidate arcs not canonically sorted: [%s, %s] after [%s, %s]", curr.DriverID, curr.LoadID, prev.DriverID, prev.LoadID)
+		}
+	}
+}
+
+func TestConcurrentFilter_EquipmentAndEndorsements(t *testing.T) {
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+	startEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
+
+	// Dry van driver (no hazmat)
+	dryDriver := model.Driver{
+		ID:              "D-DRY",
+		CurrentLocation: locChi,
+		AvailableEpoch:  startEpoch,
+		Equipment:       model.Equipment{Type: model.EquipDryVan},
+	}
+	// Reefer driver with hazmat
+	hazmatReeferDriver := model.Driver{
+		ID:              "D-REEFER-HAZ",
+		CurrentLocation: locChi,
+		AvailableEpoch:  startEpoch,
+		Equipment: model.Equipment{
+			Type:         model.EquipReefer,
+			Endorsements: []model.Endorsement{model.EndorsementHazmat},
+		},
+	}
+
+	loads := []model.Load{
+		{
+			ID:                   "L-HAZMAT",
+			Origin:               locChi,
+			Destination:          locAtl,
+			RequiredEquipment:    model.EquipDryVan,
+			RequiredEndorsements: []model.Endorsement{model.EndorsementHazmat},
+			PickupEarliestEpoch:  startEpoch,
+			PickupLatestEpoch:    startEpoch + 36000,
+			DeliveryLatestEpoch:  startEpoch + 120000,
+		},
+		{
+			ID:                  "L-REEFER",
+			Origin:              locChi,
+			Destination:         locAtl,
+			RequiredEquipment:   model.EquipReefer,
+			PickupEarliestEpoch: startEpoch,
+			PickupLatestEpoch:   startEpoch + 36000,
+			DeliveryLatestEpoch: startEpoch + 120000,
+		},
+	}
+
+	cfg := feasibility.FilterConfig{
+		Feasibility: model.DefaultFeasibilityConfig(),
+		WorkerCount: 2,
+	}
+
+	filter := feasibility.NewConcurrentFilter()
+	arcs, err := filter.FilterCandidates(context.Background(), []model.Driver{dryDriver, hazmatReeferDriver}, loads, cfg)
+	if err != nil {
+		t.Fatalf("FilterCandidates failed: %v", err)
+	}
+
+	// Dry driver should match 0 loads (L-HAZMAT requires Hazmat, L-REEFER requires Reefer)
+	// Hazmat reefer driver should match BOTH loads (reefer can haul dry hazmat and reefer)
+	if len(arcs) != 2 {
+		t.Fatalf("expected exactly 2 feasible arcs for D-REEFER-HAZ, got %d: %+v", len(arcs), arcs)
+	}
+
+	for _, arc := range arcs {
+		if arc.DriverID != "D-REEFER-HAZ" {
+			t.Fatalf("dry driver unexpectedly matched incompatible load: %+v", arc)
 		}
 	}
 }

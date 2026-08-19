@@ -162,31 +162,36 @@ func (f *ConcurrentFilter) evaluatePair(
 	load model.Load,
 	cfg model.FeasibilityConfig,
 ) (CandidateArc, bool, error) {
-	// 1. Deadhead distance check
+	// 1. Equipment & Endorsement compatibility check
+	if !driver.Equipment.CanHandle(load.RequiredEquipment, load.RequiredEndorsements) {
+		return CandidateArc{}, false, nil
+	}
+
+	// 2. Deadhead distance check
 	deadheadMiles := driver.CurrentLocation.DistanceMiles(load.Origin)
 	if cfg.MaxDeadheadMiles > 0 && deadheadMiles > cfg.MaxDeadheadMiles {
 		return CandidateArc{}, false, nil
 	}
 
-	// 2. Linehaul distance
+	// 3. Linehaul distance
 	loadedMiles := load.Origin.DistanceMiles(load.Destination)
 
-	// 3. Driver Clocks & Policy setup
-	clocks := driver.Clocks
+	// 4. Driver Clocks & Policy setup with safe fallback
 	specs := driver.PolicySpecs
+	if specs.Name == "" {
+		specs = cfg.HOSPolicySpecs
+	}
+	if specs.Name == "" {
+		specs = hos.USPolicySpecs()
+	}
+
+	clocks := driver.Clocks
 	if clocks == nil {
-		// Initialize starting clocks if not present
-		if specs.Name == "" {
-			specs = cfg.HOSPolicySpecs
-		}
-		if specs.Name == "" {
-			specs = hos.USPolicySpecs()
-		}
 		startTime := time.Unix(driver.AvailableEpoch, 0).UTC()
 		clocks = hos.NewDriverClocks(specs, startTime)
 	}
 
-	// 4. Convert load epoch windows to time.Time
+	// 5. Convert load epoch windows to time.Time
 	var pickupEarliest, pickupLatest, deliveryEarliest, deliveryLatest time.Time
 	if load.PickupEarliestEpoch > 0 {
 		pickupEarliest = time.Unix(load.PickupEarliestEpoch, 0).UTC()
@@ -201,7 +206,7 @@ func (f *ConcurrentFilter) evaluatePair(
 		deliveryLatest = time.Unix(load.DeliveryLatestEpoch, 0).UTC()
 	}
 
-	// 5. Evaluate HOS and time window feasibility via HOS simulator
+	// 6. Evaluate HOS and time window feasibility via HOS simulator
 	tripRes, err := f.sim.EvaluateTripFeasibility(
 		clocks,
 		deadheadMiles,

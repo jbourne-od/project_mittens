@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"math"
+	"sort"
 )
 
 // SquareRegion represents a geographic bounding box region for spatial aggregation
@@ -22,62 +23,109 @@ func (r SquareRegion) Contains(loc Location) bool {
 }
 
 // RegionManager manages hierarchical spatial grids and assigns geographic coordinates to regional clusters.
+//
+// In accordance with Inviolate 5 (Immutability) and Inviolate 6 (Lock-Free Hot Paths),
+// RegionManager is constructed immutably and is safe for concurrent access.
 type RegionManager struct {
 	gridStepDeg float64 // Degree resolution of grid squares (e.g. 1.0 degree ~ 69 miles)
 	regions     []SquareRegion
+	byID        map[string]SquareRegion
 }
 
-// NewRegionManager constructs a RegionManager covering North America with degree-resolution grid squares.
-func NewRegionManager(gridStepDeg float64) *RegionManager {
+// NewRegionManager constructs an immutable RegionManager with canonical region indexing.
+func NewRegionManager(gridStepDeg float64, regions []SquareRegion) *RegionManager {
 	if gridStepDeg <= 0 {
 		gridStepDeg = 1.0
 	}
+
+	copied := make([]SquareRegion, len(regions))
+	copy(copied, regions)
+	sort.Slice(copied, func(i, j int) bool {
+		return copied[i].ID < copied[j].ID
+	})
+
+	index := make(map[string]SquareRegion, len(copied))
+	for _, r := range copied {
+		// Calculate centroid if not explicitly set
+		if r.Centroid.Lat == 0 && r.Centroid.Lon == 0 && (r.MinLat != 0 || r.MaxLat != 0) {
+			r.Centroid = Location{
+				NodeID: r.ID + "_CTR",
+				Lat:    (r.MinLat + r.MaxLat) / 2.0,
+				Lon:    (r.MinLon + r.MaxLon) / 2.0,
+			}
+		}
+		index[r.ID] = r
+	}
+
 	return &RegionManager{
 		gridStepDeg: gridStepDeg,
-		regions:     nil,
+		regions:     copied,
+		byID:        index,
 	}
 }
 
-// AddRegion registers a custom regional bounding box.
-func (rm *RegionManager) AddRegion(region SquareRegion) {
-	rm.regions = append(rm.regions, region)
-}
-
-// Regions returns all registered square regions.
+// Regions returns a deep copy of all registered square regions.
 func (rm *RegionManager) Regions() []SquareRegion {
 	out := make([]SquareRegion, len(rm.regions))
 	copy(out, rm.regions)
 	return out
 }
 
+// GetRegion returns a registered region by its ID.
+func (rm *RegionManager) GetRegion(id string) (SquareRegion, bool) {
+	r, ok := rm.byID[id]
+	return r, ok
+}
+
 // GetRegionID returns the canonical region identifier for a given geographic coordinate.
 func (rm *RegionManager) GetRegionID(loc Location) string {
-	// First check registered named regions
+	// 1. Check registered named regions
 	for _, r := range rm.regions {
 		if r.Contains(loc) {
 			return r.ID
 		}
 	}
 
-	// Fall back to spatial degree grid
+	// 2. Fall back to degree grid square
 	latIdx := int(math.Floor(loc.Lat / rm.gridStepDeg))
 	lonIdx := int(math.Floor(loc.Lon / rm.gridStepDeg))
 	return fmt.Sprintf("REG_%d_%d", latIdx, lonIdx)
 }
 
-// DistanceBetweenRegions returns the approximate great-circle distance between two region centroids.
+// DistanceBetweenRegions returns the great-circle distance between two region centroids.
 func (rm *RegionManager) DistanceBetweenRegions(r1ID, r2ID string) float64 {
 	if r1ID == r2ID {
 		return 0.0
 	}
-	var lat1, lon1, lat2, lon2 float64
-	_, err1 := fmt.Sscanf(r1ID, "REG_%f_%f", &lat1, &lon1)
-	_, err2 := fmt.Sscanf(r2ID, "REG_%f_%f", &lat2, &lon2)
-	if err1 != nil || err2 != nil {
+
+	loc1, ok1 := rm.getCentroid(r1ID)
+	loc2, ok2 := rm.getCentroid(r2ID)
+	if !ok1 || !ok2 {
 		return 0.0
 	}
 
-	loc1 := Location{Lat: lat1 * rm.gridStepDeg, Lon: lon1 * rm.gridStepDeg}
-	loc2 := Location{Lat: lat2 * rm.gridStepDeg, Lon: lon2 * rm.gridStepDeg}
 	return loc1.DistanceMiles(loc2)
+}
+
+func (rm *RegionManager) getCentroid(regionID string) (Location, bool) {
+	// 1. Check registered region map
+	if r, ok := rm.byID[regionID]; ok {
+		return r.Centroid, true
+	}
+
+	// 2. Parse grid cell ID (e.g. REG_41_-88)
+	var latIdx, lonIdx int
+	n, err := fmt.Sscanf(regionID, "REG_%d_%d", &latIdx, &lonIdx)
+	if err == nil && n == 2 {
+		// Use center of the grid square
+		centerLat := (float64(latIdx) + 0.5) * rm.gridStepDeg
+		centerLon := (float64(lonIdx) + 0.5) * rm.gridStepDeg
+		return Location{
+			NodeID: regionID + "_CTR",
+			Lat:    centerLat,
+			Lon:    centerLon,
+		}, true
+	}
+
+	return Location{}, false
 }

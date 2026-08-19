@@ -413,6 +413,92 @@ func TestTimeSteppingSimulator_ConcurrentParallelRuns(t *testing.T) {
 	wg.Wait()
 }
 
+func TestOptimizationService_CompetitiveBeliefUpdating(t *testing.T) {
+	states := []string{"TightCapacity", "SurplusCapacity"}
+	tm := model.NewIdentityTransitionMatrix(states)
+	profiles := map[string]model.PostureObservationProfile{
+		"TightCapacity": {
+			ExpectedWinProbability: 0.20,
+			ExpectedSpotRateMean:   3.00,
+			ExpectedSpotRateStdDev: 0.20,
+			ExpectedOffersMean:     10.0,
+		},
+		"SurplusCapacity": {
+			ExpectedWinProbability: 0.80,
+			ExpectedSpotRateMean:   1.80,
+			ExpectedSpotRateStdDev: 0.20,
+			ExpectedOffersMean:     2.0,
+		},
+	}
+	om, err := model.NewMarketObservationModel(profiles)
+	if err != nil {
+		t.Fatalf("NewMarketObservationModel failed: %v", err)
+	}
+
+	scale := model.AggregatedMarket{LatentStates: states}
+	filter, err := model.NewCompetitiveBeliefFilter(scale, tm, om)
+	if err != nil {
+		t.Fatalf("NewCompetitiveBeliefFilter failed: %v", err)
+	}
+
+	startEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+
+	driver := model.Driver{
+		ID:              "D-01",
+		CurrentLocation: locChi,
+		AvailableEpoch:  startEpoch,
+		Equipment:       model.Equipment{Type: model.EquipDryVan},
+	}
+	res := model.NewResourceState([]model.Driver{driver}, nil)
+	info, _ := model.NewInformationState(startEpoch, 2.50, 3.50, 0)
+	priorBelief, _ := model.NewBelief(scale, states, []float64{0.5, 0.5})
+
+	state, err := model.NewState(res, info, priorBelief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	cfa := policy.NewCFAPolicy[model.AggregatedMarket](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		model.DefaultFeasibilityConfig(),
+		nil,
+	)
+
+	svc := service.NewOptimizationService[model.AggregatedMarket](nil, nil).WithBeliefFilter(filter)
+
+	// Epoch 1: Introduce 10 new loads (aligns strongly with TightCapacity mean of 10 offers)
+	var newLoads []model.Load
+	for i := 0; i < 10; i++ {
+		newLoads = append(newLoads, model.Load{
+			ID:                  fmt.Sprintf("L-%02d", i),
+			Origin:              locChi,
+			Destination:         locAtl,
+			RequiredEquipment:   model.EquipDryVan,
+			PickupEarliestEpoch: startEpoch + 1800,
+			PickupLatestEpoch:   startEpoch + 7200,
+			DeliveryLatestEpoch: startEpoch + 28800,
+			Revenue:             3.00 * 150.0,
+		})
+	}
+
+	_, _, nextState, err := svc.OptimizeEpoch(context.Background(), state, cfa, startEpoch+3600, newLoads)
+	if err != nil {
+		t.Fatalf("OptimizeEpoch failed: %v", err)
+	}
+
+	// Verify that posterior belief on TightCapacity increased
+	pTight := nextState.Belief().Probability("TightCapacity")
+	t.Logf("Posterior Belief after TightCapacity observation: TightCapacity=%.4f, SurplusCapacity=%.4f",
+		pTight, nextState.Belief().Probability("SurplusCapacity"))
+
+	if pTight <= 0.5 {
+		t.Errorf("expected belief on TightCapacity to increase > 0.5, got %f", pTight)
+	}
+}
+
 func mathAbs(x float64) float64 {
 	if x < 0 {
 		return -x

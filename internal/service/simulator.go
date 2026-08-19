@@ -173,16 +173,17 @@ func (sim *TimeSteppingSimulator[C]) Run(
 		// Accumulate metrics from evaluated provenance
 		for _, eval := range prov.EvaluatedArcs {
 			if eval.IsAssigned {
-				var deadheadMiles float64
-				var loadedMiles float64
-				if d, ok := currentState.Resource().GetDriver(eval.DriverID); ok {
-					if l, ok := currentState.Resource().GetLoad(eval.LoadID); ok {
-						deadheadMiles = d.CurrentLocation.DistanceMiles(l.Origin)
-						loadedMiles = l.Origin.DistanceMiles(l.Destination)
-					}
-				}
-				dwellMin := int(eval.CostBreakdown.DwellCost)
-				stats.RecordDispatch(eval.CostBreakdown, loadedMiles, deadheadMiles, dwellMin, 0, true, true)
+				workHours := float64(eval.TotalTripMin) / 60.0
+				stats.RecordDriverHours(workHours, 0.0)
+				stats.RecordDispatch(
+					eval.CostBreakdown,
+					eval.LoadedMiles,
+					eval.DeadheadMiles,
+					eval.InsertedDwellMin,
+					eval.InsertedRestMin,
+					true,
+					true,
+				)
 			}
 		}
 

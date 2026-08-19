@@ -189,6 +189,11 @@ func (p *CFAPolicy[C]) Evaluate(
 			VFAValue:           0.0,
 			TotalScore:         totalScore,
 			PostDecisionRegion: destRegion,
+			DeadheadMiles:      arc.DeadheadMiles,
+			LoadedMiles:        arc.LoadedMiles,
+			InsertedDwellMin:   arc.InsertedDwellMin,
+			InsertedRestMin:    arc.InsertedRestMin,
+			TotalTripMin:       arc.TotalTripMin,
 			IsAssigned:         false,
 		}
 	}

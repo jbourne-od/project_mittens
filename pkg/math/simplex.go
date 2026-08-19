@@ -89,6 +89,35 @@ func MustValidateSimplex(probs []float64, epsilon float64) {
 	}
 }
 
+// NormalizeSimplex performs L1 probability normalization using compensated summation:
+//
+//	p_i = v_i / \sum_k v_k
+//
+// Returns an error if the sum of elements is non-positive or non-finite (Inviolate 8).
+func NormalizeSimplex(v []float64) ([]float64, error) {
+	if len(v) == 0 {
+		return nil, ErrSimplexEmpty
+	}
+	for i, val := range v {
+		if math.IsNaN(val) || math.IsInf(val, 0) {
+			return nil, fmt.Errorf("%w: index %d has non-finite value %f", ErrSimplexNonFinite, i, val)
+		}
+		if val < 0.0 {
+			return nil, fmt.Errorf("%w: index %d has negative value %f", ErrSimplexNegative, i, val)
+		}
+	}
+	sum := CompensatedSum(v)
+	if sum <= 0.0 || math.IsNaN(sum) || math.IsInf(sum, 0) {
+		return nil, fmt.Errorf("%w: total vector mass is non-positive or non-finite (%f)", ErrSimplexNonFinite, sum)
+	}
+
+	normalized := make([]float64, len(v))
+	for i, val := range v {
+		normalized[i] = val / sum
+	}
+	return normalized, nil
+}
+
 // ProjectToSimplex computes the exact Euclidean projection of an arbitrary vector v in R^D
 // onto the probability simplex:
 //

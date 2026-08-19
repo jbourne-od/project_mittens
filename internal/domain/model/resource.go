@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"sort"
 
@@ -313,6 +314,13 @@ func (rs *ResourceState) Transition(matches []DriverLoadMatch, newLoads []Load) 
 		}
 	}
 	nextLoads = append(nextLoads, newLoads...)
+
+	slog.Debug("resource state transition completed",
+		slog.Int("matches", len(matches)),
+		slog.Int("new_loads", len(newLoads)),
+		slog.Int("next_drivers", len(nextDrivers)),
+		slog.Int("next_loads", len(nextLoads)),
+	)
 
 	return NewResourceState(nextDrivers, nextLoads), nil
 }

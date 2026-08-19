@@ -3,6 +3,7 @@ package hos
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 )
@@ -236,6 +237,13 @@ func (s *Simulator) insertRequiredReset(
 	*totalDuration += restDuration
 	*totalRest += restDuration
 
+	slog.Debug("hos statutory rest inserted",
+		slog.String("desc", desc),
+		slog.Int("duration_min", restDuration),
+		slog.String("location", locID),
+		slog.Time("time", start),
+	)
+
 	return nextClocks, *timeline
 }
 
@@ -371,6 +379,22 @@ func (s *Simulator) EvaluateTripFeasibility(
 	} else if !deliveryLatest.IsZero() && deliveryArrival.After(deliveryLatest) {
 		result.IsFeasible = false
 		result.InfeasibilityReason = fmt.Sprintf("delivery arrival %v is after latest delivery window %v", deliveryArrival, deliveryLatest)
+	}
+
+	if !result.IsFeasible {
+		slog.Debug("trip feasibility check failed",
+			slog.String("reason", result.InfeasibilityReason),
+			slog.Float64("deadhead_miles", deadheadMiles),
+			slog.Float64("loaded_miles", loadedMiles),
+		)
+	} else {
+		slog.Debug("trip feasibility check passed",
+			slog.Float64("deadhead_miles", deadheadMiles),
+			slog.Float64("loaded_miles", loadedMiles),
+			slog.Int("total_duration_min", totalDuration),
+			slog.Int("inserted_rest_min", totalInsertedRest),
+			slog.Int("inserted_dwell_min", insertedDwellMin),
+		)
 	}
 
 	return result, nil

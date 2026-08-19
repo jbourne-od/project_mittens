@@ -6,12 +6,28 @@
 package main
 
 import (
-	"fmt"
+	"context"
+	"log/slog"
 	"os"
+
+	"github.com/optimaldynamics/project-mittens/pkg/logging"
 )
 
 func main() {
-	// Minimal static entrypoint skeleton for Project Mittens optimizer.
-	fmt.Println("Project Mittens Optimization Engine")
+	// Initialize structured slog logger
+	cfg := logging.DefaultConfig()
+	logger := logging.New(cfg)
+	slog.SetDefault(logger)
+
+	ctx := logging.WithContextData(context.Background(), logging.ContextData{
+		OptimizationRunID: "BOOTSTRAP",
+	})
+
+	logger.InfoContext(ctx, "Project Mittens Optimization Engine Initialized",
+		slog.String("version", "0.1.0-alpha"),
+		slog.String("log_level", string(cfg.Level)),
+		slog.String("format", string(cfg.Format)),
+	)
+
 	os.Exit(0)
 }

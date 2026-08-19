@@ -45,16 +45,16 @@ func NewRegionManager(gridStepDeg float64, regions []SquareRegion) *RegionManage
 	})
 
 	index := make(map[string]SquareRegion, len(copied))
-	for _, r := range copied {
+	for i := range copied {
 		// Calculate centroid if not explicitly set
-		if r.Centroid.Lat == 0 && r.Centroid.Lon == 0 && (r.MinLat != 0 || r.MaxLat != 0) {
-			r.Centroid = Location{
-				NodeID: r.ID + "_CTR",
-				Lat:    (r.MinLat + r.MaxLat) / 2.0,
-				Lon:    (r.MinLon + r.MaxLon) / 2.0,
+		if copied[i].Centroid.Lat == 0 && copied[i].Centroid.Lon == 0 && (copied[i].MinLat != 0 || copied[i].MaxLat != 0) {
+			copied[i].Centroid = Location{
+				NodeID: copied[i].ID + "_CTR",
+				Lat:    (copied[i].MinLat + copied[i].MaxLat) / 2.0,
+				Lon:    (copied[i].MinLon + copied[i].MaxLon) / 2.0,
 			}
 		}
-		index[r.ID] = r
+		index[copied[i].ID] = copied[i]
 	}
 
 	return &RegionManager{

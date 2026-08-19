@@ -74,6 +74,15 @@ func (d Driver) IsIdle() bool {
 	return d.AssignedLoadID == ""
 }
 
+// Clone creates an exact deep copy of the Driver entity, cloning internal pointer clocks (Inviolate 5).
+func (d Driver) Clone() Driver {
+	copied := d
+	if d.Clocks != nil {
+		copied.Clocks = d.Clocks.Clone()
+	}
+	return copied
+}
+
 // Load represents a customer freight load shipment card available in the network.
 type Load struct {
 	ID                     string
@@ -109,7 +118,9 @@ type ResourceState struct {
 // and sorts them canonically to guarantee determinism (AGENTS.md Section 3.4).
 func NewResourceState(drivers []Driver, loads []Load) *ResourceState {
 	copiedDrivers := make([]Driver, len(drivers))
-	copy(copiedDrivers, drivers)
+	for i, d := range drivers {
+		copiedDrivers[i] = d.Clone()
+	}
 	sort.Slice(copiedDrivers, func(i, j int) bool {
 		return copiedDrivers[i].ID < copiedDrivers[j].ID
 	})
@@ -138,10 +149,20 @@ func NewResourceState(drivers []Driver, loads []Load) *ResourceState {
 	}
 }
 
+// Clone returns an exact deep copy of the ResourceState (Inviolate 5).
+func (rs *ResourceState) Clone() *ResourceState {
+	if rs == nil {
+		return nil
+	}
+	return NewResourceState(rs.drivers, rs.loads)
+}
+
 // Drivers returns a deep copy of the active driver fleet slice.
 func (rs *ResourceState) Drivers() []Driver {
 	out := make([]Driver, len(rs.drivers))
-	copy(out, rs.drivers)
+	for i, d := range rs.drivers {
+		out[i] = d.Clone()
+	}
 	return out
 }
 
@@ -162,13 +183,13 @@ func (rs *ResourceState) LoadCount() int {
 	return len(rs.loads)
 }
 
-// GetDriver returns a driver by ID in O(1) time.
+// GetDriver returns a deep-copied driver by ID in O(1) time.
 func (rs *ResourceState) GetDriver(id string) (Driver, bool) {
 	idx, ok := rs.driverIndex[id]
 	if !ok {
 		return Driver{}, false
 	}
-	return rs.drivers[idx], true
+	return rs.drivers[idx].Clone(), true
 }
 
 // GetLoad returns a load by ID in O(1) time.
@@ -229,7 +250,9 @@ func (rs *ResourceState) Transition(matches []DriverLoadMatch, newLoads []Load) 
 
 	// Prepare updated drivers
 	nextDrivers := make([]Driver, len(rs.drivers))
-	copy(nextDrivers, rs.drivers)
+	for i, d := range rs.drivers {
+		nextDrivers[i] = d.Clone()
+	}
 
 	for _, m := range matches {
 		idx := rs.driverIndex[m.DriverID]
@@ -239,10 +262,20 @@ func (rs *ResourceState) Transition(matches []DriverLoadMatch, newLoads []Load) 
 		d.CurrentLocation = load.Destination
 		d.AvailableEpoch = m.DispatchEpoch + load.EstimatedTransitEpochs
 		d.AssignedLoadID = "" // Load completed upon transition to next epoch
+
 		// Update hours of service
 		transitHours := float64(load.EstimatedTransitEpochs)
 		d.DriveHoursRemaining = max(0.0, d.DriveHoursRemaining-transitHours)
 		d.DutyHoursRemaining = max(0.0, d.DutyHoursRemaining-transitHours)
+
+		// Advance clocks if present
+		if d.Clocks != nil {
+			transitMinutes := int(transitHours * 60.0)
+			updatedClocks, err := d.Clocks.ApplyDrive(transitMinutes, d.PolicySpecs)
+			if err == nil {
+				d.Clocks = updatedClocks
+			}
+		}
 
 		nextDrivers[idx] = d
 	}

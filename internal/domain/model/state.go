@@ -75,7 +75,7 @@ func (s *State[C]) Belief() *Belief[C] {
 // Clone returns an exact duplicate of the State block (Inviolate 5).
 func (s *State[C]) Clone() *State[C] {
 	return &State[C]{
-		resource:    s.resource, // ResourceState is immutable, safe to share pointer
+		resource:    s.resource.Clone(),
 		information: s.information.Clone(),
 		belief:      s.belief.Clone(),
 	}

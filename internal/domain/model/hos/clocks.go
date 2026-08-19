@@ -55,8 +55,9 @@ type DriverClocks struct {
 	consecutiveDrivingMin   int   // Cumulative driving minutes since last >=30-min break
 	dutyMinutesByDay        []int // Rolling daily duty history (minutes per day)
 	currentDayIndex         int   // Index of current day in rolling cycle
-	sleeperSplitActive      bool  // True if driver completed a valid first qualifying sleeper split break
-	lastSleeperSplitMin     int   // Duration of the first qualifying split break
+	hasPendingSplit         bool  // True if driver completed a valid first qualifying sleeper split period
+	pendingSplitMin         int   // Duration of the first qualifying split period
+	pendingSplitIsSleeper   bool  // Whether the first qualifying period was in the sleeper berth
 	hasAdverseConditions    bool
 	drivingCeilingExtension int
 }
@@ -133,6 +134,9 @@ func (c *DriverClocks) MaxImmediateDriveMin() int {
 
 // Clone creates an exact deep copy of the DriverClocks structure (Inviolate 5).
 func (c *DriverClocks) Clone() *DriverClocks {
+	if c == nil {
+		return nil
+	}
 	copiedDays := make([]int, len(c.dutyMinutesByDay))
 	copy(copiedDays, c.dutyMinutesByDay)
 
@@ -147,8 +151,9 @@ func (c *DriverClocks) Clone() *DriverClocks {
 		consecutiveDrivingMin:   c.consecutiveDrivingMin,
 		dutyMinutesByDay:        copiedDays,
 		currentDayIndex:         c.currentDayIndex,
-		sleeperSplitActive:      c.sleeperSplitActive,
-		lastSleeperSplitMin:     c.lastSleeperSplitMin,
+		hasPendingSplit:         c.hasPendingSplit,
+		pendingSplitMin:         c.pendingSplitMin,
+		pendingSplitIsSleeper:   c.pendingSplitIsSleeper,
 		hasAdverseConditions:    c.hasAdverseConditions,
 		drivingCeilingExtension: c.drivingCeilingExtension,
 	}
@@ -237,7 +242,9 @@ func (c *DriverClocks) ApplyOffDuty(durationMin int, isSleeper bool, specs Polic
 		next.remainingShiftMin = specs.MaxShiftMin
 		next.remainingHygieneMin = specs.MaxHygieneMin
 		next.consecutiveDrivingMin = 0
-		next.sleeperSplitActive = false
+		next.hasPendingSplit = false
+		next.pendingSplitMin = 0
+		next.pendingSplitIsSleeper = false
 		return next, nil
 	}
 
@@ -247,45 +254,48 @@ func (c *DriverClocks) ApplyOffDuty(durationMin int, isSleeper bool, specs Polic
 		next.remainingShiftMin = specs.MaxShiftMin
 		next.remainingHygieneMin = specs.MaxHygieneMin
 		next.consecutiveDrivingMin = 0
-		next.sleeperSplitActive = false
+		next.hasPendingSplit = false
+		next.pendingSplitMin = 0
+		next.pendingSplitIsSleeper = false
 		return next, nil
 	}
 
-	// 3. Sleeper Berth Split Provision (8/2 or 7/3 split)
-	// Qualifying short break: >= 2 hours (120 mins)
-	// Qualifying long rest: >= 7 hours in sleeper berth (420 mins)
-	if isSleeper && durationMin >= specs.MinSleeperBerthResetMin {
-		// Long sleeper split break
-		if next.sleeperSplitActive {
-			// Second qualifying period completes the split reset!
-			next.remainingDrivingMin = specs.MaxDrivingMin + next.drivingCeilingExtension
-			next.remainingShiftMin = specs.MaxShiftMin
-			next.remainingHygieneMin = specs.MaxHygieneMin
-			next.consecutiveDrivingMin = 0
-			next.sleeperSplitActive = false
-		} else {
-			// First qualifying split period
-			next.sleeperSplitActive = true
-			next.lastSleeperSplitMin = durationMin
-			next.remainingHygieneMin = specs.MaxHygieneMin
-			next.consecutiveDrivingMin = 0
+	// 3. Sleeper Berth Split Provision (FMCSA 49 CFR § 395.1(g) - 8/2 or 7/3 split)
+	// Statutory requirements for a valid split reset:
+	// - One period must be >= 7 hours (420 min) spent in the sleeper berth (isSleeper == true).
+	// - The other period must be >= 2 hours (120 min) off-duty or sleeper berth.
+	// - Both periods combined must total at least 10 hours (600 min).
+	isLongSleeper := isSleeper && durationMin >= specs.MinSleeperBerthResetMin
+	isShortBreak := durationMin >= specs.MinSleeperBerthBreakMin
+
+	if isLongSleeper || isShortBreak {
+		if next.hasPendingSplit {
+			// Evaluate pairing validity between the pending period and the current period
+			hasLong := (next.pendingSplitIsSleeper && next.pendingSplitMin >= specs.MinSleeperBerthResetMin) || isLongSleeper
+			hasShort := (next.pendingSplitMin >= specs.MinSleeperBerthBreakMin) && isShortBreak
+			totalCombined := next.pendingSplitMin + durationMin
+
+			if hasLong && hasShort && totalCombined >= specs.DailyResetMin {
+				// Valid qualifying split pair! Resets driving and shift clocks
+				next.remainingDrivingMin = specs.MaxDrivingMin + next.drivingCeilingExtension
+				next.remainingShiftMin = specs.MaxShiftMin
+				next.remainingHygieneMin = specs.MaxHygieneMin
+				next.consecutiveDrivingMin = 0
+
+				// Current period now serves as the anchor for the next potential rolling split
+				next.hasPendingSplit = true
+				next.pendingSplitMin = durationMin
+				next.pendingSplitIsSleeper = isSleeper
+				return next, nil
+			}
 		}
-		return next, nil
-	} else if durationMin >= specs.MinSleeperBerthBreakMin {
-		// Short split break (>= 2 hours)
-		if next.sleeperSplitActive {
-			// Completes pair with previous long sleeper rest
-			next.remainingDrivingMin = specs.MaxDrivingMin + next.drivingCeilingExtension
-			next.remainingShiftMin = specs.MaxShiftMin
-			next.remainingHygieneMin = specs.MaxHygieneMin
-			next.consecutiveDrivingMin = 0
-			next.sleeperSplitActive = false
-		} else {
-			next.sleeperSplitActive = true
-			next.lastSleeperSplitMin = durationMin
-			next.remainingHygieneMin = specs.MaxHygieneMin
-			next.consecutiveDrivingMin = 0
-		}
+
+		// If no valid pair was completed, register the current break as the new pending split anchor
+		next.hasPendingSplit = true
+		next.pendingSplitMin = durationMin
+		next.pendingSplitIsSleeper = isSleeper
+		next.remainingHygieneMin = specs.MaxHygieneMin
+		next.consecutiveDrivingMin = 0
 		return next, nil
 	}
 
@@ -295,9 +305,9 @@ func (c *DriverClocks) ApplyOffDuty(durationMin int, isSleeper bool, specs Polic
 		next.consecutiveDrivingMin = 0
 	}
 
-	// Off-duty time pauses the shift countdown only if it was a qualifying split break;
-	// otherwise ordinary off-duty time continues to count against the 14-hour consecutive window
-	if !next.sleeperSplitActive {
+	// Off-duty time pauses the shift countdown only during a qualifying split break;
+	// otherwise ordinary non-qualifying off-duty time continues to count against the 14-hour consecutive window.
+	if !next.hasPendingSplit {
 		next.remainingShiftMin = max(0, next.remainingShiftMin-durationMin)
 	}
 

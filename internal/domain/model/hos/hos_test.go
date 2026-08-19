@@ -127,9 +127,45 @@ func TestHOS_SleeperBerthSplitProvision(t *testing.T) {
 		t.Fatalf("split break failed: %v", err)
 	}
 
-	// Completing the 7/3 pair resets the 11-hour driving and 14-hour shift clocks
+	// Completing the valid 7/3 pair (total 10h) resets the 11-hour driving and 14-hour shift clocks
 	if clocks.RemainingDrivingMin() != specs.MaxDrivingMin {
 		t.Fatalf("RemainingDrivingMin = %d, expected full reset to %d", clocks.RemainingDrivingMin(), specs.MaxDrivingMin)
+	}
+}
+
+func TestHOS_SleeperBerthSplit_IllegalShortBreaksRejected(t *testing.T) {
+	// FMCSA 49 CFR § 395.1(g): Two 2-hour breaks (4 hours total) MUST NOT trigger a daily clock reset
+	specs := hos.USPolicySpecs()
+	start := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC)
+	clocks := hos.NewDriverClocks(specs, start)
+
+	// Drive 5 hours (300 mins)
+	clocks, err := clocks.ApplyDrive(300, specs)
+	if err != nil {
+		t.Fatalf("drive failed: %v", err)
+	}
+
+	// First short break: 2 hours off-duty (120 mins)
+	clocks, err = clocks.ApplyOffDuty(120, false, specs)
+	if err != nil {
+		t.Fatalf("first short break failed: %v", err)
+	}
+
+	// Drive another 4 hours (240 mins)
+	clocks, err = clocks.ApplyDrive(240, specs)
+	if err != nil {
+		t.Fatalf("second drive failed: %v", err)
+	}
+
+	// Second short break: 2 hours off-duty (120 mins)
+	clocks, err = clocks.ApplyOffDuty(120, false, specs)
+	if err != nil {
+		t.Fatalf("second short break failed: %v", err)
+	}
+
+	// Two 2-hour breaks do NOT total 10h and lack a >=7h sleeper period -> NO full reset!
+	if clocks.RemainingDrivingMin() >= specs.MaxDrivingMin {
+		t.Fatalf("Illegal reset! RemainingDrivingMin = %d was fully reset after only two 2-hour breaks", clocks.RemainingDrivingMin())
 	}
 }
 
@@ -183,6 +219,45 @@ func TestHOS_TripFeasibilityEvaluation(t *testing.T) {
 	}
 	if resInf.IsFeasible {
 		t.Fatalf("expected trip to be infeasible due to tight pickup window")
+	}
+}
+
+func TestHOS_TripFeasibilityEvaluation_EarlyArrivalDwell(t *testing.T) {
+	specs := hos.USPolicySpecs()
+	start := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC)
+	clocks := hos.NewDriverClocks(specs, start)
+	sim := hos.NewSimulator()
+
+	// Deadhead takes 1 hour (driver arrives at 9:00 AM)
+	// pickupEarliest is 10:00 AM -> must model 1 hour (60 min) early arrival dwell!
+	pickupEarliest := start.Add(2 * time.Hour)   // 10:00 AM
+	pickupLatest := start.Add(4 * time.Hour)     // 12:00 PM
+	deliveryEarliest := start.Add(6 * time.Hour) // 2:00 PM
+	deliveryLatest := start.Add(12 * time.Hour)  // 8:00 PM
+
+	res, err := sim.EvaluateTripFeasibility(
+		clocks,
+		50.0, 250.0,
+		60, 60,
+		50.0,
+		pickupEarliest, pickupLatest,
+		deliveryEarliest, deliveryLatest,
+		specs,
+	)
+	if err != nil {
+		t.Fatalf("EvaluateTripFeasibility failed: %v", err)
+	}
+
+	if !res.IsFeasible {
+		t.Fatalf("expected trip to be feasible: %s", res.InfeasibilityReason)
+	}
+	if res.InsertedDwellMin != 60 {
+		t.Fatalf("InsertedDwellMin = %d, expected 60 min early arrival dwell", res.InsertedDwellMin)
+	}
+	// Loading must start at 10:00 AM (after dwell) and end at 11:00 AM (60 min loading)
+	expectedLoadingEnd := start.Add(3 * time.Hour)
+	if !res.LoadingEndTime.Equal(expectedLoadingEnd) {
+		t.Fatalf("LoadingEndTime = %v, expected %v", res.LoadingEndTime, expectedLoadingEnd)
 	}
 }
 

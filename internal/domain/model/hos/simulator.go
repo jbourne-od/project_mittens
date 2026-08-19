@@ -3,6 +3,7 @@ package hos
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -248,11 +249,21 @@ type TripFeasibilityResult struct {
 	DeadheadDriveMin     int
 	LoadedDriveMin       int
 	InsertedRestMin      int
+	InsertedDwellMin     int
 	TotalTripDurationMin int
 	InfeasibilityReason  string
 }
 
-// EvaluateTripFeasibility performs end-to-end trip projection and checks time window feasibility.
+// EvaluateTripFeasibility performs end-to-end trip projection, evaluating:
+//  1. Deadhead transit to origin facility.
+//  2. Early arrival dwell if driver arrives prior to pickupEarliest.
+//  3. Freight loading at origin.
+//  4. Linehaul transit to destination facility.
+//  5. Early arrival dwell if driver arrives prior to deliveryEarliest.
+//  6. Freight unloading at destination.
+//
+// In accordance with legacy FleetManager parity, checks pickup window [pickupEarliest, pickupLatest]
+// and delivery window [deliveryEarliest, deliveryLatest].
 func (s *Simulator) EvaluateTripFeasibility(
 	initialClocks *DriverClocks,
 	deadheadMiles, loadedMiles float64,
@@ -266,44 +277,76 @@ func (s *Simulator) EvaluateTripFeasibility(
 		avgSpeedMPH = 50.0 // Canonical default 50 MPH
 	}
 
-	deadheadDriveMin := int((deadheadMiles / avgSpeedMPH) * 60.0)
-	loadedDriveMin := int((loadedMiles / avgSpeedMPH) * 60.0)
+	deadheadDriveMin := int(math.Ceil((deadheadMiles / avgSpeedMPH) * 60.0))
+	loadedDriveMin := int(math.Ceil((loadedMiles / avgSpeedMPH) * 60.0))
 
-	events := []Event{
-		DriveEvent(deadheadDriveMin, deadheadMiles, "ORIGIN_TRANSIT"),
-		LoadingEvent(loadingMin, "ORIGIN_FACILITY"),
-		DriveEvent(loadedDriveMin, loadedMiles, "LINEHAUL_TRANSIT"),
-		UnloadingEvent(unloadingMin, "DEST_FACILITY"),
+	// Step 1: Simulate Deadhead transit to origin
+	deadheadEvents := []Event{
+		DriveEvent(deadheadDriveMin, deadheadMiles, "ORIGIN_DEADHEAD"),
 	}
-
-	simRes, err := s.Simulate(initialClocks, events, specs, true)
+	res1, err := s.Simulate(initialClocks, deadheadEvents, specs, true)
 	if err != nil {
 		return nil, err
 	}
 
-	// Extract phase timestamps from timeline
-	var pickupArrival, loadingEnd, deliveryArrival, unloadingEnd time.Time
-	foundPickup := false
-	foundLoading := false
-	foundDelivery := false
+	pickupArrival := res1.FinalClocks.Now()
+	clocksAfterPickup := res1.FinalClocks
 
-	for _, entry := range simRes.Timeline {
-		if !foundPickup && entry.Event.Type == EventLoading {
-			pickupArrival = entry.StartTime
-			foundPickup = true
-		}
-		if foundPickup && !foundLoading && entry.Event.Type == EventLoading {
-			loadingEnd = entry.EndTime
-			foundLoading = true
-		}
-		if !foundDelivery && entry.Event.Type == EventUnloading {
-			deliveryArrival = entry.StartTime
-			foundDelivery = true
-		}
-		if foundDelivery && entry.Event.Type == EventUnloading {
-			unloadingEnd = entry.EndTime
+	// Step 2: Model early arrival dwell at origin if arriving prior to pickupEarliest
+	insertedDwellMin := 0
+	if !pickupEarliest.IsZero() && pickupArrival.Before(pickupEarliest) {
+		earlyPickupDwell := int(math.Ceil(pickupEarliest.Sub(pickupArrival).Minutes()))
+		if earlyPickupDwell > 0 {
+			insertedDwellMin += earlyPickupDwell
+			resDwell, err := s.Simulate(clocksAfterPickup, []Event{HoldEvent(earlyPickupDwell, "ORIGIN_EARLY_ARRIVAL_DWELL")}, specs, true)
+			if err != nil {
+				return nil, err
+			}
+			clocksAfterPickup = resDwell.FinalClocks
 		}
 	}
+
+	// Step 3: Freight loading at origin
+	resLoading, err := s.Simulate(clocksAfterPickup, []Event{LoadingEvent(loadingMin, "ORIGIN_FACILITY")}, specs, true)
+	if err != nil {
+		return nil, err
+	}
+	loadingEnd := resLoading.FinalClocks.Now()
+	clocksAfterLoading := resLoading.FinalClocks
+
+	// Step 4: Linehaul transit to destination facility
+	linehaulEvents := []Event{
+		DriveEvent(loadedDriveMin, loadedMiles, "LINEHAUL_TRANSIT"),
+	}
+	resLinehaul, err := s.Simulate(clocksAfterLoading, linehaulEvents, specs, true)
+	if err != nil {
+		return nil, err
+	}
+	deliveryArrival := resLinehaul.FinalClocks.Now()
+	clocksAfterDelivery := resLinehaul.FinalClocks
+
+	// Step 5: Model early arrival dwell at destination if arriving prior to deliveryEarliest
+	if !deliveryEarliest.IsZero() && deliveryArrival.Before(deliveryEarliest) {
+		earlyDeliveryDwell := int(math.Ceil(deliveryEarliest.Sub(deliveryArrival).Minutes()))
+		if earlyDeliveryDwell > 0 {
+			insertedDwellMin += earlyDeliveryDwell
+			resDwell, err := s.Simulate(clocksAfterDelivery, []Event{HoldEvent(earlyDeliveryDwell, "DEST_EARLY_ARRIVAL_DWELL")}, specs, true)
+			if err != nil {
+				return nil, err
+			}
+			clocksAfterDelivery = resDwell.FinalClocks
+		}
+	}
+
+	// Step 6: Freight unloading at destination
+	resUnloading, err := s.Simulate(clocksAfterDelivery, []Event{UnloadingEvent(unloadingMin, "DEST_FACILITY")}, specs, true)
+	if err != nil {
+		return nil, err
+	}
+	unloadingEnd := resUnloading.FinalClocks.Now()
+
+	totalDuration := int(math.Ceil(unloadingEnd.Sub(initialClocks.Now()).Minutes()))
+	totalInsertedRest := (res1.TotalRestMin + resLoading.TotalRestMin + resLinehaul.TotalRestMin + resUnloading.TotalRestMin)
 
 	result := &TripFeasibilityResult{
 		IsFeasible:           true,
@@ -313,11 +356,12 @@ func (s *Simulator) EvaluateTripFeasibility(
 		UnloadingEndTime:     unloadingEnd,
 		DeadheadDriveMin:     deadheadDriveMin,
 		LoadedDriveMin:       loadedDriveMin,
-		InsertedRestMin:      simRes.TotalRestMin,
-		TotalTripDurationMin: simRes.TotalDurationMin,
+		InsertedRestMin:      totalInsertedRest,
+		InsertedDwellMin:     insertedDwellMin,
+		TotalTripDurationMin: totalDuration,
 	}
 
-	// Validate time windows
+	// Validate appointment and time window feasibility
 	if !pickupLatest.IsZero() && pickupArrival.After(pickupLatest) {
 		result.IsFeasible = false
 		result.InfeasibilityReason = fmt.Sprintf("pickup arrival %v is after latest pickup window %v", pickupArrival, pickupLatest)

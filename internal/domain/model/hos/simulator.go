@@ -286,6 +286,7 @@ type TripFeasibilityResult struct {
 	InsertedDwellMin     int
 	TotalTripDurationMin int
 	InfeasibilityReason  string
+	FinalClocks          *DriverClocks
 }
 
 // EvaluateTripFeasibility performs end-to-end trip projection, evaluating:
@@ -396,6 +397,7 @@ func (s *Simulator) EvaluateTripFeasibility(
 		InsertedRestMin:      totalInsertedRest,
 		InsertedDwellMin:     insertedDwellMin,
 		TotalTripDurationMin: totalDuration,
+		FinalClocks:          resUnloading.FinalClocks,
 	}
 
 	// Validate appointment and time window feasibility

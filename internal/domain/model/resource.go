@@ -65,6 +65,8 @@ type Driver struct {
 	DutyHoursRemaining  float64
 	DriveHoursRemaining float64
 	AssignedLoadID      string // Empty string indicates the driver is unassigned / idle
+	Equipment           Equipment
+	Endorsements        []Endorsement
 	Clocks              *hos.DriverClocks
 	PolicySpecs         hos.PolicySpecs
 }
@@ -74,9 +76,17 @@ func (d Driver) IsIdle() bool {
 	return d.AssignedLoadID == ""
 }
 
-// Clone creates an exact deep copy of the Driver entity, cloning internal pointer clocks (Inviolate 5).
+// Clone creates an exact deep copy of the Driver entity, cloning internal pointer clocks and slices (Inviolate 5).
 func (d Driver) Clone() Driver {
 	copied := d
+	if len(d.Endorsements) > 0 {
+		copied.Endorsements = make([]Endorsement, len(d.Endorsements))
+		copy(copied.Endorsements, d.Endorsements)
+	}
+	if len(d.Equipment.Endorsements) > 0 {
+		copied.Equipment.Endorsements = make([]Endorsement, len(d.Equipment.Endorsements))
+		copy(copied.Equipment.Endorsements, d.Equipment.Endorsements)
+	}
 	if d.Clocks != nil {
 		copied.Clocks = d.Clocks.Clone()
 	}
@@ -92,9 +102,20 @@ type Load struct {
 	PickupLatestEpoch      int64
 	DeliveryEarliestEpoch  int64
 	DeliveryLatestEpoch    int64
-	RequiredEquipment      string
+	RequiredEquipment      EquipmentType
+	RequiredEndorsements   []Endorsement
 	Revenue                float64
 	EstimatedTransitEpochs int64
+}
+
+// Clone creates an exact deep copy of the Load entity, cloning internal slices (Inviolate 5).
+func (l Load) Clone() Load {
+	copied := l
+	if len(l.RequiredEndorsements) > 0 {
+		copied.RequiredEndorsements = make([]Endorsement, len(l.RequiredEndorsements))
+		copy(copied.RequiredEndorsements, l.RequiredEndorsements)
+	}
+	return copied
 }
 
 // ResourceState (R_t) models the fully observable physical state of the carrier network at discrete epoch t.
@@ -126,7 +147,9 @@ func NewResourceState(drivers []Driver, loads []Load) *ResourceState {
 	})
 
 	copiedLoads := make([]Load, len(loads))
-	copy(copiedLoads, loads)
+	for i, l := range loads {
+		copiedLoads[i] = l.Clone()
+	}
 	sort.Slice(copiedLoads, func(i, j int) bool {
 		return copiedLoads[i].ID < copiedLoads[j].ID
 	})
@@ -169,7 +192,9 @@ func (rs *ResourceState) Drivers() []Driver {
 // Loads returns a deep copy of the outstanding load inventory slice.
 func (rs *ResourceState) Loads() []Load {
 	out := make([]Load, len(rs.loads))
-	copy(out, rs.loads)
+	for i, l := range rs.loads {
+		out[i] = l.Clone()
+	}
 	return out
 }
 
@@ -192,13 +217,13 @@ func (rs *ResourceState) GetDriver(id string) (Driver, bool) {
 	return rs.drivers[idx].Clone(), true
 }
 
-// GetLoad returns a load by ID in O(1) time.
+// GetLoad returns a deep-copied load by ID in O(1) time.
 func (rs *ResourceState) GetLoad(id string) (Load, bool) {
 	idx, ok := rs.loadIndex[id]
 	if !ok {
 		return Load{}, false
 	}
-	return rs.loads[idx], true
+	return rs.loads[idx].Clone(), true
 }
 
 // DriverLoadMatch represents the physical assignment of a driver resource to a customer load.

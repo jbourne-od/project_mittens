@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 )
 
@@ -107,24 +108,29 @@ func (a *Action) ValidateFeasibility(resource *ResourceState) error {
 
 	for _, m := range a.matches {
 		if seenDrivers[m.DriverID] {
+			slog.Debug("action validation rejected duplicate driver match", slog.String("driver_id", m.DriverID))
 			return fmt.Errorf("%w: driver %s", ErrDuplicateMatch, m.DriverID)
 		}
 		seenDrivers[m.DriverID] = true
 
 		if seenMatchLoads[m.LoadID] {
+			slog.Debug("action validation rejected duplicate load match", slog.String("load_id", m.LoadID))
 			return fmt.Errorf("%w: load %s", ErrDuplicateMatch, m.LoadID)
 		}
 		seenMatchLoads[m.LoadID] = true
 
 		driver, ok := resource.GetDriver(m.DriverID)
 		if !ok {
+			slog.Debug("action validation rejected unknown driver", slog.String("driver_id", m.DriverID))
 			return fmt.Errorf("%w: driver %s does not exist", ErrDriverNotFound, m.DriverID)
 		}
 		if !driver.IsIdle() {
+			slog.Debug("action validation rejected non-idle driver", slog.String("driver_id", driver.ID), slog.String("assigned_load", driver.AssignedLoadID))
 			return fmt.Errorf("%w: driver %s is not idle (assigned to %s)", ErrDriverAlreadyAssigned, driver.ID, driver.AssignedLoadID)
 		}
 
 		if _, ok := resource.GetLoad(m.LoadID); !ok {
+			slog.Debug("action validation rejected unknown load", slog.String("load_id", m.LoadID))
 			return fmt.Errorf("%w: load %s does not exist", ErrLoadNotFound, m.LoadID)
 		}
 	}
@@ -132,18 +138,26 @@ func (a *Action) ValidateFeasibility(resource *ResourceState) error {
 	seenBidLoads := make(map[string]bool, len(a.bids))
 	for _, b := range a.bids {
 		if seenBidLoads[b.LoadID] {
+			slog.Debug("action validation rejected duplicate bid", slog.String("load_id", b.LoadID))
 			return fmt.Errorf("%w: load %s", ErrDuplicateBid, b.LoadID)
 		}
 		seenBidLoads[b.LoadID] = true
 
 		if b.BidPrice <= 0 {
+			slog.Debug("action validation rejected invalid bid price", slog.String("load_id", b.LoadID), slog.Float64("price", b.BidPrice))
 			return fmt.Errorf("%w: load %s has bid price %f", ErrInvalidBidPrice, b.LoadID, b.BidPrice)
 		}
 
 		if _, ok := resource.GetLoad(b.LoadID); !ok {
+			slog.Debug("action validation rejected unknown bid load", slog.String("load_id", b.LoadID))
 			return fmt.Errorf("%w: load %s does not exist", ErrLoadNotFound, b.LoadID)
 		}
 	}
+
+	slog.Debug("action validation succeeded",
+		slog.Int("matches", len(a.matches)),
+		slog.Int("bids", len(a.bids)),
+	)
 
 	return nil
 }

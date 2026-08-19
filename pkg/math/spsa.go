@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 )
 
@@ -185,7 +186,21 @@ func OptimizeSPSA(ctx context.Context, cfg SPSAConfig, initialTheta []float64, l
 
 		// Project updated parameter vector into feasible domain
 		projectTheta(theta, cfg.LowerBounds, cfg.UpperBounds)
+
+		if k%10 == 0 || k == cfg.MaxIterations-1 {
+			slog.DebugContext(ctx, "spsa step",
+				slog.Int("iter", k),
+				slog.Float64("best_loss", bestLoss),
+				slog.Float64("step_size", ak),
+				slog.Float64("perturbation", ck),
+			)
+		}
 	}
+
+	slog.DebugContext(ctx, "spsa optimization finished",
+		slog.Int("iterations", cfg.MaxIterations),
+		slog.Float64("final_best_loss", bestLoss),
+	)
 
 	return bestTheta, bestLoss, nil
 }

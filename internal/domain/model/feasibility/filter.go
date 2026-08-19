@@ -3,6 +3,7 @@ package feasibility
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"sort"
 	"sync"
@@ -164,12 +165,24 @@ func (f *ConcurrentFilter) evaluatePair(
 ) (CandidateArc, bool, error) {
 	// 1. Equipment & Endorsement compatibility check
 	if !driver.Equipment.CanHandle(load.RequiredEquipment, load.RequiredEndorsements) {
+		slog.Debug("candidate arc rejected: equipment incompatible",
+			slog.String("driver_id", driver.ID),
+			slog.String("load_id", load.ID),
+			slog.String("driver_equipment", string(driver.Equipment.Type)),
+			slog.String("required_equipment", string(load.RequiredEquipment)),
+		)
 		return CandidateArc{}, false, nil
 	}
 
 	// 2. Deadhead distance check
 	deadheadMiles := driver.CurrentLocation.DistanceMiles(load.Origin)
 	if cfg.MaxDeadheadMiles > 0 && deadheadMiles > cfg.MaxDeadheadMiles {
+		slog.Debug("candidate arc rejected: deadhead limit exceeded",
+			slog.String("driver_id", driver.ID),
+			slog.String("load_id", load.ID),
+			slog.Float64("deadhead_miles", deadheadMiles),
+			slog.Float64("max_deadhead", cfg.MaxDeadheadMiles),
+		)
 		return CandidateArc{}, false, nil
 	}
 
@@ -224,6 +237,11 @@ func (f *ConcurrentFilter) evaluatePair(
 	}
 
 	if !tripRes.IsFeasible {
+		slog.Debug("candidate arc rejected: trip infeasible",
+			slog.String("driver_id", driver.ID),
+			slog.String("load_id", load.ID),
+			slog.String("reason", tripRes.InfeasibilityReason),
+		)
 		return CandidateArc{}, false, nil
 	}
 

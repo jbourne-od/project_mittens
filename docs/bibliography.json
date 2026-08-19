@@ -1,0 +1,106 @@
+{
+  "project": "Project Mittens",
+  "generated_at": "2026-08-19T03:35:00Z",
+  "purpose": "Machine-readable bibliography of key mathematical and software references for implementing agents and verification tools.",
+  "references": [
+    {
+      "id": "powell-2022-rl-so",
+      "author": "Powell, Warren B.",
+      "year": 2022,
+      "title": "Reinforcement Learning and Stochastic Optimization: A Unified Framework for Sequential Decisions",
+      "publisher": "John Wiley & Sons",
+      "url": "http://tinyurl.com/RLandSO/",
+      "role_in_mittens": "Establishes the canonical 5-element sequential decision analytics (SDA) model (State, Decision, Exogenous Information, Transition, Objective) and the 4 universal classes of policies (PFA, CFA, VFA, DLA). Grounding for Inviolate 1 and Inviolate 7."
+    },
+    {
+      "id": "powell-2022-sda-python",
+      "author": "Powell, Warren B.",
+      "year": 2022,
+      "title": "Sequential Decision Analytics and Modeling: Modeling with Python",
+      "publisher": "Princeton University / Castle Lab",
+      "url": "http://tinyurl.com/sdaexamplesprint",
+      "role_in_mittens": "Guides explicit state modeling and parameter management. Backs Inviolate 0 (no ambient environment variable loading during semantic execution)."
+    },
+    {
+      "id": "silver-veness-2010-pomcp",
+      "author": "Silver, David and Veness, Joel",
+      "year": 2010,
+      "title": "Monte-Carlo Planning in Large POMDPs",
+      "journal": "Advances in Neural Information Processing Systems (NIPS 2010)",
+      "volume": "23",
+      "pages": "2164-2172",
+      "url": "https://arxiv.org/abs/1109.2145",
+      "role_in_mittens": "Establishes Partially Observable Monte Carlo Planning (POMCP) and the UCT tree search over histories. Core mathematical backbone for Mittens' Direct Lookahead Approximations (DLAs) in Section 7.4 of the HLD."
+    },
+    {
+      "id": "araya-lopez-2010-momdp",
+      "author": "Araya-López, Mauricio and Thomas, Vincent and Buffet, Olivier and Charpillet, François",
+      "year": 2010,
+      "title": "A Closer Look at MOMDPs",
+      "institution": "HAL-Inria / LORIA",
+      "url": "https://inria.hal.science/inria-00535559v1",
+      "role_in_mittens": "Establishes Mixed-Observability Markov Decision Processes (MOMDPs). Provides the mathematical foundation for factoring fully observable physical states (Rt) out of the latent competitive belief space, enforcing Inviolate 2."
+    },
+    {
+      "id": "bernstein-2002-dec-pomdp",
+      "author": "Bernstein, Daniel S. and Givan, Robert and Immerman, Neil and Zilberstein, Shlomo",
+      "year": 2002,
+      "title": "The Complexity of Decentralized Control of Markov Decision Processes",
+      "journal": "Mathematics of Operations Research",
+      "volume": "27",
+      "number": "4",
+      "pages": "819-840",
+      "url": "https://arxiv.org/abs/1301.3836",
+      "role_in_mittens": "Defines complexity bounds and decentralization. Forms the theoretical ceiling for multi-agent games, justifying our competitor-collapsing simplification and reinforcing Inviolate 3 (competitive-dimension genericity Nc >= 0)."
+    },
+    {
+      "id": "powell-ghadimi-2022-cfa",
+      "author": "Powell, Warren B. and Ghadimi, S.",
+      "year": 2022,
+      "title": "The Parametric Cost Function Approximation: A new approach for multistage stochastic programming",
+      "journal": "arXiv preprint",
+      "id_code": "arXiv:2201.00258",
+      "url": "https://arxiv.org/abs/2201.00258",
+      "role_in_mittens": "Underpins our Cost Function Approximation (CFA) policy structure. Section 7.2 of the HLD leverages this for parameterizing driver allocation and win-rate pricing coefficients under unobserved competitor concentration."
+    },
+    {
+      "id": "ye-despot-2017",
+      "author": "Ye, Nan and Somani, Aditi and Hsu, David and Lee, Wee Sun",
+      "year": 2017,
+      "title": "DESPOT: Online POMDP Planning with Regularization",
+      "journal": "Journal of Artificial Intelligence Research",
+      "volume": "58",
+      "pages": "231-266",
+      "url": "http://bigbird.comp.nus.edu.sg/pmwiki/farm/appl/",
+      "role_in_mittens": "Introduces Determinized Sparse Partially Observable Trees (DESPOT). Core reference for executing low-variance lookahead searches by sampling scenarios from our competitive belief state (HLD Section 7.4)."
+    },
+    {
+      "id": "juliapomdp-framework",
+      "author": "JuliaPOMDP",
+      "year": 2026,
+      "title": "POMDPs.jl: A Framework for Sequential Decision Making under Uncertainty",
+      "publisher": "GitHub",
+      "url": "https://github.com/JuliaPOMDP/POMDPs.jl",
+      "role_in_mittens": "The primary API pattern inspiration. Illustrates how to model states, actions, observations, and updaters using decoupled type hierarchies. Serves as the blueprint for our generic Go interfaces (Inviolate 3)."
+    },
+    {
+      "id": "tu-2019-go-concurrency",
+      "author": "Tu, Tengfei and Liu, Xiaoran and Song, Linhai and Zhang, Yiying",
+      "year": 2019,
+      "title": "Understanding Real-World Concurrency Bugs in Go",
+      "booktitle": "Proceedings of the ASPLOS '19",
+      "pages": "819-833",
+      "url": "http://dx.doi.org/10.1145/3297858.3304069",
+      "role_in_mittens": "Provides the safety foundation for lock-free goroutine coordination, channel buffer sizing, and timeout contexts, forming the basis of Inviolate 6 and AGENTS.md concurrency patterns."
+    },
+    {
+      "id": "uber-go-style",
+      "author": "Uber Technologies, Inc.",
+      "year": 2026,
+      "title": "Uber Go Style Guide",
+      "publisher": "GitHub",
+      "url": "https://github.com/uber-go/guide/blob/master/style.md",
+      "role_in_mittens": "Establishes quality standards for Go structures. Inviolate 0 specifically references its 'Avoid Init' pattern to eliminate ambient global state modifications."
+    }
+  ]
+}

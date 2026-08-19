@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
+	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
 )
 
 // LocationStore maps postal codes and node IDs to physical geographic coordinates.
@@ -17,9 +19,13 @@ type LocationStore struct {
 	locations map[string]model.Location
 }
 
-// NewLocationStore initializes a LocationStore from a map.
+// NewLocationStore initializes a LocationStore from a map with defensive copying (Inviolate 5).
 func NewLocationStore(locs map[string]model.Location) *LocationStore {
-	return &LocationStore{locations: locs}
+	copied := make(map[string]model.Location, len(locs))
+	for k, v := range locs {
+		copied[k] = v
+	}
+	return &LocationStore{locations: copied}
 }
 
 // GetLocation retrieves the Location for a given node ID or postal zip code,
@@ -102,27 +108,10 @@ func ParseLocations(r io.Reader) (*LocationStore, error) {
 			Lon:    lon,
 		}
 		locMap[code] = loc
-
-		// Also index zero-padded code if shorter than 5 digits
-		if len(code) < 5 {
-			padded := fmt.Sprintf("%0*s", 5, code)
-			padded = strings.ReplaceAll(padded, " ", "0")
-			locMap[padded] = loc
-		}
-
-		// If zipcode column exists (e.g. last column), index by zipcode too
-		zip := fields[len(fields)-1]
-		if zip != "." && zip != "" && zip != code {
-			locMap[zip] = model.Location{
-				NodeID: zip,
-				Lat:    lat,
-				Lon:    lon,
-			}
-			if len(zip) < 5 {
-				paddedZip := fmt.Sprintf("%0*s", 5, zip)
-				paddedZip = strings.ReplaceAll(paddedZip, " ", "0")
-				locMap[paddedZip] = locMap[zip]
-			}
+		// Also store without leading zeros if applicable
+		trimmedCode := strings.TrimLeft(code, "0")
+		if trimmedCode != "" && trimmedCode != code {
+			locMap[trimmedCode] = loc
 		}
 	}
 
@@ -136,28 +125,67 @@ func ParseLocations(r io.Reader) (*LocationStore, error) {
 // ParseDrivers parses a legacy drivers.txt file into a slice of domain model Drivers.
 func ParseDrivers(r io.Reader, locStore *LocationStore) ([]model.Driver, error) {
 	scanner := bufio.NewScanner(r)
-	var drivers []model.Driver
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
 
-	isHeader := true
+	var drivers []model.Driver
+	var headerMap map[string]int
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if isHeader {
-			isHeader = false
+
+		// Detect delimiter
+		var fields []string
+		if strings.Contains(line, "\t") {
+			fields = strings.Split(line, "\t")
+			for i := range fields {
+				fields[i] = strings.TrimSpace(fields[i])
+			}
+		} else {
+			fields = strings.Fields(line)
+		}
+
+		if headerMap == nil {
+			headerMap = make(map[string]int)
+			for idx, col := range fields {
+				headerMap[strings.ToUpper(col)] = idx
+			}
 			continue
 		}
 
-		fields := strings.Fields(line)
-		if len(fields) < 6 {
-			continue
+		getField := func(names ...string) string {
+			for _, n := range names {
+				if idx, ok := headerMap[strings.ToUpper(n)]; ok && idx < len(fields) {
+					return fields[idx]
+				}
+			}
+			return ""
 		}
 
-		driverID := fields[0]
-		availDT := fields[3]
-		availTM := fields[4]
-		availLocID := fields[5]
+		driverID := getField("DRIVER_ID", "DRVR_ID", "ID")
+		if driverID == "" && len(fields) > 0 {
+			driverID = fields[0]
+		}
+
+		availDT := getField("DRIVER_DT", "AVAIL_DT", "NEXT_ON_DUTY_DT")
+		availTM := getField("DRIVER_TM", "AVAIL_TM", "NEXT_ON_DUTY_TM")
+		availLocID := getField("DRIVER_LOCATION", "CURR_LOC", "NEXT_ON_DUTY_LOCATION", "LOCATION")
+		homeLocID := getField("HOME", "HOME_LOCATION")
+		equipStr := getField("EQUIPMENT", "EQUIP", "REQ_EQUIP")
+
+		// Positional fallback if headers not found
+		if availLocID == "" && len(fields) >= 6 {
+			availDT = fields[3]
+			availTM = fields[4]
+			availLocID = fields[5]
+			homeLocID = fields[2]
+			if len(fields) >= 7 {
+				equipStr = fields[6]
+			}
+		}
 
 		availEpoch, _ := parseLegacyDateTime(availDT, availTM)
 
@@ -166,22 +194,37 @@ func ParseDrivers(r io.Reader, locStore *LocationStore) ([]model.Driver, error) 
 			loc = model.Location{NodeID: availLocID}
 		}
 
-		equipType := model.EquipDryVan
-		if len(fields) >= 7 {
-			switch strings.ToUpper(fields[6]) {
-			case "REEFER", "REEFER_53":
-				equipType = model.EquipReefer
-			case "FLATBED", "FLATBED_53":
-				equipType = model.EquipFlatbed
-			case "TANKER":
-				equipType = model.EquipTanker
-			}
-		}
-
-		homeLocID := fields[2]
 		homeLoc, ok := locStore.GetLocation(homeLocID)
 		if !ok {
 			homeLoc = loc
+		}
+
+		equipType := model.EquipDryVan
+		switch strings.ToUpper(equipStr) {
+		case "R", "REEFER", "REEFER_53":
+			equipType = model.EquipReefer
+		case "FB", "FLATBED", "FLATBED_53":
+			equipType = model.EquipFlatbed
+		case "TANKER":
+			equipType = model.EquipTanker
+		}
+
+		// Parse initial HOS clocks if available
+		var clocks *hos.DriverClocks
+		if availEpoch > 0 {
+			startTime := time.Unix(availEpoch, 0).UTC()
+			clocks = hos.NewDriverClocks(hos.USPolicySpecs(), startTime)
+
+			drivingHoursStr := getField("DRIVING_HOURS")
+			if drivingHoursStr != "" {
+				driveH, _ := strconv.ParseFloat(drivingHoursStr, 64)
+				driveMin := int(math.Round(driveH * 60.0))
+				if driveMin > 0 {
+					if nextClocks, err := clocks.ApplyDrive(driveMin, hos.USPolicySpecs()); err == nil {
+						clocks = nextClocks
+					}
+				}
+			}
 		}
 
 		d := model.Driver{
@@ -192,6 +235,7 @@ func ParseDrivers(r io.Reader, locStore *LocationStore) ([]model.Driver, error) 
 			DriveHoursRemaining: 11.0,
 			DutyHoursRemaining:  14.0,
 			Equipment:           model.Equipment{Type: equipType},
+			Clocks:              clocks,
 		}
 
 		drivers = append(drivers, d)
@@ -207,9 +251,12 @@ func ParseDrivers(r io.Reader, locStore *LocationStore) ([]model.Driver, error) 
 // ParseLoads parses a legacy loads.txt file into a slice of domain model Loads.
 func ParseLoads(r io.Reader, locStore *LocationStore, maxLoads int) ([]model.Load, error) {
 	scanner := bufio.NewScanner(r)
-	var loads []model.Load
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
 
-	isHeader := true
+	var loads []model.Load
+	var headerMap map[string]int
+
 	for scanner.Scan() {
 		if maxLoads > 0 && len(loads) >= maxLoads {
 			break
@@ -219,35 +266,79 @@ func ParseLoads(r io.Reader, locStore *LocationStore, maxLoads int) ([]model.Loa
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if isHeader {
-			isHeader = false
+
+		var fields []string
+		if strings.Contains(line, "\t") {
+			fields = strings.Split(line, "\t")
+			for i := range fields {
+				fields[i] = strings.TrimSpace(fields[i])
+			}
+		} else {
+			fields = strings.Fields(line)
+		}
+
+		if headerMap == nil {
+			headerMap = make(map[string]int)
+			for idx, col := range fields {
+				headerMap[strings.ToUpper(col)] = idx
+			}
 			continue
 		}
 
-		fields := strings.Fields(line)
-		if len(fields) < 25 {
-			continue
+		getField := func(names ...string) string {
+			for _, n := range names {
+				if idx, ok := headerMap[strings.ToUpper(n)]; ok && idx < len(fields) {
+					return fields[idx]
+				}
+			}
+			return ""
 		}
 
-		loadID := fields[0]
-		origID := fields[10]
-		destID := fields[17]
-
-		pkupStDT := fields[12]
-		pkupStTM := fields[13]
-		pkupEndDT := fields[14]
-		pkupEndTM := fields[15]
-
-		dlvStDT := fields[19]
-		dlvStTM := fields[20]
-		dlvEndDT := fields[21]
-		dlvEndTM := fields[22]
-
-		linehaulRev, _ := strconv.ParseFloat(fields[24], 64)
-		otherRev := 0.0
-		if len(fields) >= 26 {
-			otherRev, _ = strconv.ParseFloat(fields[25], 64)
+		loadID := getField("LOAD_ID", "ID")
+		if loadID == "" && len(fields) > 0 {
+			loadID = fields[0]
 		}
+
+		origID := getField("ORIG", "ORIGIN", "PICKUP_LOC")
+		destID := getField("DEST", "DESTINATION", "DROPOFF_LOC")
+
+		pkupStDT := getField("PKUP_ST_DT", "PICKUP_ST_DT")
+		pkupStTM := getField("PKUP_ST_TM", "PICKUP_ST_TM")
+		pkupEndDT := getField("PKUP_END_DT", "PICKUP_END_DT")
+		pkupEndTM := getField("PKUP_END_TM", "PICKUP_END_TM")
+
+		dlvStDT := getField("DLVERY_ST_DT", "DELIVERY_ST_DT")
+		dlvStTM := getField("DLVERY_ST_TM", "DELIVERY_ST_TM")
+		dlvEndDT := getField("DLVERY_END_DT", "DELIVERY_END_DT")
+		dlvEndTM := getField("DLVERY_END_TM", "DELIVERY_END_TM")
+
+		linehaulRevStr := getField("LINE_HAUL_REV", "LINEHAUL_REV", "REVENUE")
+		otherRevStr := getField("OTHER_REV")
+		equipStr := getField("EQUIP", "EQUIPMENT", "REQ_EQUIP")
+
+		// Positional fallback
+		if origID == "" && len(fields) >= 25 {
+			origID = fields[10]
+			destID = fields[17]
+			pkupStDT = fields[12]
+			pkupStTM = fields[13]
+			pkupEndDT = fields[14]
+			pkupEndTM = fields[15]
+			dlvStDT = fields[19]
+			dlvStTM = fields[20]
+			dlvEndDT = fields[21]
+			dlvEndTM = fields[22]
+			linehaulRevStr = fields[24]
+			if len(fields) >= 26 {
+				otherRevStr = fields[25]
+			}
+			if len(fields) >= 4 {
+				equipStr = fields[3]
+			}
+		}
+
+		linehaulRev, _ := strconv.ParseFloat(linehaulRevStr, 64)
+		otherRev, _ := strconv.ParseFloat(otherRevStr, 64)
 		totalRev := linehaulRev + otherRev
 
 		pkupEarliest, _ := parseLegacyDateTime(pkupStDT, pkupStTM)
@@ -265,15 +356,13 @@ func ParseLoads(r io.Reader, locStore *LocationStore, maxLoads int) ([]model.Loa
 		}
 
 		equipType := model.EquipDryVan
-		if len(fields) >= 4 {
-			switch strings.ToUpper(fields[3]) {
-			case "REEFER", "REEFER_53":
-				equipType = model.EquipReefer
-			case "FLATBED", "FLATBED_53":
-				equipType = model.EquipFlatbed
-			case "TANKER":
-				equipType = model.EquipTanker
-			}
+		switch strings.ToUpper(equipStr) {
+		case "R", "REEFER", "REEFER_53":
+			equipType = model.EquipReefer
+		case "FB", "FLATBED", "FLATBED_53":
+			equipType = model.EquipFlatbed
+		case "TANKER":
+			equipType = model.EquipTanker
 		}
 
 		l := model.Load{
@@ -284,8 +373,8 @@ func ParseLoads(r io.Reader, locStore *LocationStore, maxLoads int) ([]model.Loa
 			PickupLatestEpoch:     pkupLatest,
 			DeliveryEarliestEpoch: dlvEarliest,
 			DeliveryLatestEpoch:   dlvLatest,
-			RequiredEquipment:     equipType,
 			Revenue:               totalRev,
+			RequiredEquipment:     equipType,
 		}
 
 		loads = append(loads, l)
@@ -298,11 +387,8 @@ func ParseLoads(r io.Reader, locStore *LocationStore, maxLoads int) ([]model.Loa
 	return loads, nil
 }
 
-// LoadCarrierScenario reads and parses a complete carrier test scenario directory.
-func LoadCarrierScenario(
-	locationsFile, driversFile, loadsFile string,
-	maxLoads int,
-) ([]model.Driver, []model.Load, *LocationStore, error) {
+// LoadCarrierScenario loads locations, drivers, and loads from their respective file paths.
+func LoadCarrierScenario(locationsFile, driversFile, loadsFile string, maxLoads int) ([]model.Driver, []model.Load, *LocationStore, error) {
 	locF, err := os.Open(locationsFile)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("legacy: cannot open locations file: %w", err)

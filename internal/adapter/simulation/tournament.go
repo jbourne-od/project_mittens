@@ -56,6 +56,92 @@ type EpisodeScore struct {
 	NetContributionLiftPercent float64 `json:"net_contribution_lift_percent"`
 }
 
+// TripartiteDecomposition decomposes total economic lift into Value of Action Space vs Value of Information.
+type TripartiteDecomposition struct {
+	MeanLegacy             float64 `json:"mean_legacy"`
+	MeanBlind              float64 `json:"mean_blind"`
+	MeanInformed           float64 `json:"mean_informed"`
+	TotalLiftDollars       float64 `json:"total_lift_dollars"`       // V_informed - V_legacy
+	TotalLiftPercent       float64 `json:"total_lift_percent"`       // (TotalLift / MeanLegacy) * 100
+	ValueOfActionSpace     float64 `json:"value_of_action_space"`     // V_blind - V_legacy
+	ValueOfActionSpacePct  float64 `json:"value_of_action_space_pct"`  // (VoA / TotalLift) * 100
+	ValueOfInformation     float64 `json:"value_of_information"`     // V_informed - V_blind
+	ValueOfInformationPct  float64 `json:"value_of_information_pct"`  // (VoI / TotalLift) * 100
+}
+
+// SummaryString formats the economic attribution decomposition.
+func (d TripartiteDecomposition) SummaryString() string {
+	return fmt.Sprintf(
+		"Tripartite Economic Decomposition:\n"+
+			"  1. Legacy Monopolistic Mean:       $%.2f\n"+
+			"  2. Competitive Blind Mean:         $%.2f\n"+
+			"  3. Competitive Informed Mean:      $%.2f\n"+
+			"  --------------------------------------------------\n"+
+			"  Total Economic Lift:               +$%.2f (+%.2f%%)\n"+
+			"    ├── Value of Action Space:       +$%.2f (%.1f%% of lift)\n"+
+			"    └── Value of Information (VoI):  +$%.2f (%.1f%% of lift)",
+		d.MeanLegacy, d.MeanBlind, d.MeanInformed,
+		d.TotalLiftDollars, d.TotalLiftPercent,
+		d.ValueOfActionSpace, d.ValueOfActionSpacePct,
+		d.ValueOfInformation, d.ValueOfInformationPct,
+	)
+}
+
+// FactorialDecomposition2x2 encapsulates the full 2x2 factorial experimental evaluation.
+type FactorialDecomposition2x2 struct {
+	V00_LegacyBlind              float64 `json:"v00_legacy_blind"`              // Legacy Action Space + Blind Belief
+	V01_LegacyInformed           float64 `json:"v01_legacy_informed"`           // Legacy Action Space + Informed Belief
+	V10_CompetitiveBlind         float64 `json:"v10_competitive_blind"`         // Competitive Action Space + Blind Belief
+	V11_CompetitiveInformed      float64 `json:"v11_competitive_informed"`      // Competitive Action Space + Informed Belief
+	MainEffectActionSpace        float64 `json:"main_effect_action_space"`      // 0.5 * [(V10 - V00) + (V11 - V01)]
+	MainEffectInformation        float64 `json:"main_effect_information"`       // 0.5 * [(V01 - V00) + (V11 - V10)]
+	InteractionEffect            float64 `json:"interaction_effect"`            // V11 - V10 - V01 + V00 (Complementarity)
+	TotalLift                    float64 `json:"total_lift"`                    // V11 - V00
+	ConditionalVoIUnderComp      float64 `json:"conditional_voi_under_comp"`    // V11 - V10
+	ConditionalVoIUnderLegacy    float64 `json:"conditional_voi_under_legacy"`  // V01 - V00
+}
+
+// SummaryString formats the 2x2 factorial analysis.
+func (f FactorialDecomposition2x2) SummaryString() string {
+	return fmt.Sprintf(
+		"2x2 Factorial Economic Matrix:\n"+
+			"                   | Blind Belief (b0) | Informed Belief (bt) | Marginal VoI\n"+
+			"  -----------------+-------------------+----------------------+-------------\n"+
+			"  Legacy Action    | V00 = $%9.2f  | V01 = $%9.2f     | $%+9.2f\n"+
+			"  Competitive Act. | V10 = $%9.2f  | V11 = $%9.2f     | $%+9.2f\n"+
+			"  -----------------+-------------------+----------------------+-------------\n"+
+			"  Marginal VoA     | $%+9.2f       | $%+9.2f          | Total: $%+9.2f\n\n"+
+			"  Main Effect of Action Space (VoA):  +$%9.2f\n"+
+			"  Main Effect of Information (VoI):   +$%9.2f\n"+
+			"  Interaction Effect (Complement):   +$%9.2f",
+		f.V00_LegacyBlind, f.V01_LegacyInformed, f.ConditionalVoIUnderLegacy,
+		f.V10_CompetitiveBlind, f.V11_CompetitiveInformed, f.ConditionalVoIUnderComp,
+		f.V10_CompetitiveBlind-f.V00_LegacyBlind, f.V11_CompetitiveInformed-f.V01_LegacyInformed, f.TotalLift,
+		f.MainEffectActionSpace, f.MainEffectInformation, f.InteractionEffect,
+	)
+}
+
+// FactorialReport2x2 encapsulates the full 2x2 factorial experimental run.
+type FactorialReport2x2 struct {
+	Config               TournamentConfig          `json:"config"`
+	Factorial            FactorialDecomposition2x2 `json:"factorial"`
+	TTestV11VsV00        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v00"`
+	TTestV11VsV10        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v10"`
+	TTestV10VsV00        pkgmath.PairedTTestResult `json:"t_test_v10_vs_v00"`
+	TTestV01VsV00        pkgmath.PairedTTestResult `json:"t_test_v01_vs_v00"`
+	ExecutionDurationSec float64                   `json:"execution_duration_sec"`
+}
+
+// TripartiteReport encapsulates the findings of a 3-way head-to-head tournament.
+type TripartiteReport struct {
+	Config                TournamentConfig          `json:"config"`
+	Decomposition         TripartiteDecomposition   `json:"decomposition"`
+	TTestInformedVsLegacy pkgmath.PairedTTestResult `json:"t_test_informed_vs_legacy"`
+	TTestInformedVsBlind  pkgmath.PairedTTestResult `json:"t_test_informed_vs_blind"`
+	TTestBlindVsLegacy    pkgmath.PairedTTestResult `json:"t_test_blind_vs_legacy"`
+	ExecutionDurationSec  float64                   `json:"execution_duration_sec"`
+}
+
 // TournamentReport encapsulates aggregate statistical findings and hypothesis test results.
 type TournamentReport struct {
 	Config                   TournamentConfig          `json:"config"`
@@ -438,6 +524,442 @@ func (r *TournamentRunner) runEpisodeN1(ctx context.Context, seed uint64) (simRe
 		WonLoads:        totWon,
 		LostLoads:       totLost,
 		WinRate:         winRate,
+	}, nil
+}
+
+// runEpisodeN1Blind runs a multi-day simulation using a competitive policy that has access to the
+// spot pricing action space, but maintains a fixed uninformative belief prior (zero Bayesian updates).
+func (r *TournamentRunner) runEpisodeN1Blind(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, _ := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+
+	marketScale := model.AggregatedMarket{LatentStates: []string{"AGGRESSIVE", "MODERATE", "PASSIVE"}}
+	initBelief, _ := model.NewBelief[model.AggregatedMarket](
+		marketScale,
+		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
+		[]float64{1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0},
+	)
+	state, _ := model.NewState(resState, infoState, initBelief)
+
+	cfaParams := policy.CFAParameters{
+		ThetaEmpty: 1.0,
+		ThetaHome:  1.0,
+		ThetaDwell: 1.0,
+		ThetaRisk:  0.0,
+	}
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+	cfaPol := policy.NewCFAPolicy[model.AggregatedMarket](cfaParams, costCfg, feasCfg, nil)
+	compPol, err := policy.NewCompetitivePOMDPPolicy[model.AggregatedMarket](
+		cfaPol,
+		policy.DefaultCompetitivePricingConfig(),
+	)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed to initialize competitive blind policy: %w", err)
+	}
+
+	totRev := 0.0
+	totCost := 0.0
+	totWon := 0
+	totLost := 0
+
+	for step := 0; step < totalEpochs; step++ {
+		epoch := startEpoch + int64(step)*stepSec
+		nextEpoch := epoch + stepSec
+
+		// 1. Evaluate Competitive POMDP Policy (with static prior belief)
+		action, prov, err := compPol.Evaluate(ctx, state)
+		if err != nil {
+			return simResult{}, err
+		}
+
+		// 2. Step Market Environment (Censored Auction)
+		outcome, _, err := env.Step(epoch, action, state.Resource().Loads())
+		if err != nil {
+			return simResult{}, err
+		}
+
+		// 3. Blind baseline DOES NOT update belief: remains initBelief
+
+		// 4. Accounting & Filtering Won Matches
+		wonLoadIDs := make(map[string]bool, len(outcome.WonLoads))
+		for _, l := range outcome.WonLoads {
+			wonLoadIDs[l.ID] = true
+		}
+
+		wonMatches := make([]model.DriverLoadMatch, 0, len(outcome.WonLoads))
+		for _, m := range action.Matches() {
+			if wonLoadIDs[m.LoadID] {
+				wonMatches = append(wonMatches, m)
+			}
+		}
+
+		totWon += len(outcome.WonLoads)
+		totLost += len(outcome.LostLoads)
+		for _, rev := range outcome.CarrierRevenues {
+			totRev += rev
+		}
+		for _, arc := range prov.EvaluatedArcs {
+			if arc.IsAssigned && wonLoadIDs[arc.LoadID] {
+				totCost += arc.CostBreakdown.TotalCost
+			}
+		}
+
+		// 5. Ingest new load arrivals and execute physical resource transition
+		incomingLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, nextEpoch, rng)
+		nextRes, err := state.Resource().Transition(wonMatches, incomingLoads)
+		if err != nil {
+			return simResult{}, err
+		}
+		nextInfo, err := state.Information().Transition(nextEpoch, 2.50, 3.85, len(incomingLoads))
+		if err != nil {
+			return simResult{}, err
+		}
+		// Belief remains static uninformative prior
+		state, err = model.NewState(nextRes, nextInfo, initBelief)
+		if err != nil {
+			return simResult{}, err
+		}
+	}
+
+	winRate := 0.0
+	if totWon+totLost > 0 {
+		winRate = float64(totWon) / float64(totWon+totLost)
+	}
+
+	return simResult{
+		GrossRevenue:    totRev,
+		OperatingCost:   totCost,
+		NetContribution: totRev - totCost,
+		WonLoads:        totWon,
+		LostLoads:       totLost,
+		WinRate:         winRate,
+	}, nil
+}
+
+// RunTripartite executes a 3-way tournament evaluating Legacy (N=0), Blind (N=1 static prior),
+// and Informed (N=1 belief-filtered) policies to isolate the Value of Information from the Value of Action Space.
+func (r *TournamentRunner) RunTripartite(ctx context.Context) (*TripartiteReport, error) {
+	startTime := time.Now()
+	cfg := r.cfg
+	if cfg.Episodes < 2 {
+		cfg.Episodes = 2
+	}
+
+	nLegacy := make([]float64, cfg.Episodes)
+	nBlind := make([]float64, cfg.Episodes)
+	nInformed := make([]float64, cfg.Episodes)
+
+	for ep := 0; ep < cfg.Episodes; ep++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		epSeed := cfg.BaseSeed + uint64(ep)*7919
+
+		// 1. Run Legacy Monopolistic (N=0)
+		scoreLegacy, err := r.runEpisodeN0(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("tripartite: episode %d legacy failed: %w", ep, err)
+		}
+
+		// 2. Run Competitive Blind (N=1 static prior)
+		scoreBlind, err := r.runEpisodeN1Blind(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("tripartite: episode %d blind failed: %w", ep, err)
+		}
+
+		// 3. Run Competitive Informed (N=1 belief-filtered)
+		scoreInformed, err := r.runEpisodeN1(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("tripartite: episode %d informed failed: %w", ep, err)
+		}
+
+		nLegacy[ep] = scoreLegacy.NetContribution
+		nBlind[ep] = scoreBlind.NetContribution
+		nInformed[ep] = scoreInformed.NetContribution
+	}
+
+	tInformedVsLegacy, err := pkgmath.ComputePairedTTest(nLegacy, nInformed)
+	if err != nil {
+		return nil, fmt.Errorf("tripartite: t-test informed vs legacy failed: %w", err)
+	}
+	tInformedVsBlind, err := pkgmath.ComputePairedTTest(nBlind, nInformed)
+	if err != nil {
+		return nil, fmt.Errorf("tripartite: t-test informed vs blind failed: %w", err)
+	}
+	tBlindVsLegacy, err := pkgmath.ComputePairedTTest(nLegacy, nBlind)
+	if err != nil {
+		return nil, fmt.Errorf("tripartite: t-test blind vs legacy failed: %w", err)
+	}
+
+	totalLift := tInformedVsLegacy.MeanDifference
+	voa := tBlindVsLegacy.MeanDifference
+	voi := tInformedVsBlind.MeanDifference
+
+	voaPct := 0.0
+	voiPct := 0.0
+	if math.Abs(totalLift) > 1e-6 {
+		voaPct = (voa / totalLift) * 100.0
+		voiPct = (voi / totalLift) * 100.0
+	}
+
+	decomp := TripartiteDecomposition{
+		MeanLegacy:             tInformedVsLegacy.MeanBaseline,
+		MeanBlind:              tInformedVsBlind.MeanBaseline,
+		MeanInformed:           tInformedVsLegacy.MeanCandidate,
+		TotalLiftDollars:       totalLift,
+		TotalLiftPercent:       tInformedVsLegacy.PercentLift,
+		ValueOfActionSpace:     voa,
+		ValueOfActionSpacePct:  voaPct,
+		ValueOfInformation:     voi,
+		ValueOfInformationPct:  voiPct,
+	}
+
+	return &TripartiteReport{
+		Config:                cfg,
+		Decomposition:         decomp,
+		TTestInformedVsLegacy: tInformedVsLegacy,
+		TTestInformedVsBlind:  tInformedVsBlind,
+		TTestBlindVsLegacy:    tBlindVsLegacy,
+		ExecutionDurationSec:  time.Since(startTime).Seconds(),
+	}, nil
+}
+
+// runEpisodeN0Informed runs a multi-day simulation using the Legacy Action Space (no spot pricing),
+// but updating the Bayesian belief state to evaluate driver risk and dispatch defensively (V01).
+func (r *TournamentRunner) runEpisodeN0Informed(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, _ := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+
+	marketScale := model.AggregatedMarket{LatentStates: []string{"AGGRESSIVE", "MODERATE", "PASSIVE"}}
+	initBelief, _ := model.NewBelief[model.AggregatedMarket](
+		marketScale,
+		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
+		[]float64{1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0},
+	)
+	state, _ := model.NewState(resState, infoState, initBelief)
+
+	tMatrix, _ := model.NewTransitionMatrix(
+		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
+		r.cfg.Market.TransitionProb,
+	)
+	loadsMean := float64(r.cfg.LoadsPerEpoch)
+	obsModel, _ := model.NewMarketObservationModel(map[string]model.PostureObservationProfile{
+		"AGGRESSIVE": {ExpectedWinProbability: 0.35, ExpectedSpotRateMean: 2.15, ExpectedSpotRateStdDev: 0.10, ExpectedOffersMean: loadsMean},
+		"MODERATE":   {ExpectedWinProbability: 0.65, ExpectedSpotRateMean: 2.50, ExpectedSpotRateStdDev: 0.10, ExpectedOffersMean: loadsMean},
+		"PASSIVE":    {ExpectedWinProbability: 0.85, ExpectedSpotRateMean: 2.95, ExpectedSpotRateStdDev: 0.10, ExpectedOffersMean: loadsMean},
+	})
+	beliefFilter, _ := model.NewCompetitiveBeliefFilter[model.AggregatedMarket](marketScale, tMatrix, obsModel)
+
+	// CFA Policy with posture-informed risk adjustment but NO spot pricing wrapper (P_legacy, informed)
+	cfaParams := policy.CFAParameters{
+		ThetaEmpty: 1.0,
+		ThetaHome:  1.0,
+		ThetaDwell: 1.0,
+		ThetaRisk:  0.25, // Informed risk adjustment on dispatch
+	}
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+	cfaPol := policy.NewCFAPolicy[model.AggregatedMarket](cfaParams, costCfg, feasCfg, nil)
+
+	totRev := 0.0
+	totCost := 0.0
+	totWon := 0
+	totLost := 0
+
+	for step := 0; step < totalEpochs; step++ {
+		epoch := startEpoch + int64(step)*stepSec
+		nextEpoch := epoch + stepSec
+
+		// 1. Evaluate CFA Policy directly (Legacy Action Space: Fixed Tariff / Monopolistic Matching)
+		action, prov, err := cfaPol.Evaluate(ctx, state)
+		if err != nil {
+			return simResult{}, err
+		}
+
+		// 2. Step Market Environment
+		outcome, obs, err := env.Step(epoch, action, state.Resource().Loads())
+		if err != nil {
+			return simResult{}, err
+		}
+
+		// 3. Update Bayesian Belief Filter
+		nextBelief, err := beliefFilter.Filter(state.Belief(), obs, action)
+		if err != nil {
+			return simResult{}, fmt.Errorf("factorial: belief filter update failed: %w", err)
+		}
+
+		// 4. Accounting & Filtering Won Matches
+		wonLoadIDs := make(map[string]bool, len(outcome.WonLoads))
+		for _, l := range outcome.WonLoads {
+			wonLoadIDs[l.ID] = true
+		}
+
+		wonMatches := make([]model.DriverLoadMatch, 0, len(outcome.WonLoads))
+		for _, m := range action.Matches() {
+			if wonLoadIDs[m.LoadID] {
+				wonMatches = append(wonMatches, m)
+			}
+		}
+
+		totWon += len(outcome.WonLoads)
+		totLost += len(outcome.LostLoads)
+		for _, rev := range outcome.CarrierRevenues {
+			totRev += rev
+		}
+		for _, arc := range prov.EvaluatedArcs {
+			if arc.IsAssigned && wonLoadIDs[arc.LoadID] {
+				totCost += arc.CostBreakdown.TotalCost
+			}
+		}
+
+		// 5. Ingest new load arrivals and execute physical resource transition
+		incomingLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, nextEpoch, rng)
+		nextRes, err := state.Resource().Transition(wonMatches, incomingLoads)
+		if err != nil {
+			return simResult{}, err
+		}
+		nextInfo, err := state.Information().Transition(nextEpoch, 2.50, 3.85, len(incomingLoads))
+		if err != nil {
+			return simResult{}, err
+		}
+		state, err = model.NewState(nextRes, nextInfo, nextBelief)
+		if err != nil {
+			return simResult{}, err
+		}
+	}
+
+	winRate := 0.0
+	if totWon+totLost > 0 {
+		winRate = float64(totWon) / float64(totWon+totLost)
+	}
+
+	return simResult{
+		GrossRevenue:    totRev,
+		OperatingCost:   totCost,
+		NetContribution: totRev - totCost,
+		WonLoads:        totWon,
+		LostLoads:       totLost,
+		WinRate:         winRate,
+	}, nil
+}
+
+// RunFactorial2x2 executes the complete 2x2 factorial experiment evaluating V00, V01, V10, V11
+// across common random number streams to compute main effects and interaction (complementarity).
+func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialReport2x2, error) {
+	startTime := time.Now()
+	cfg := r.cfg
+	if cfg.Episodes < 2 {
+		cfg.Episodes = 2
+	}
+
+	v00 := make([]float64, cfg.Episodes)
+	v01 := make([]float64, cfg.Episodes)
+	v10 := make([]float64, cfg.Episodes)
+	v11 := make([]float64, cfg.Episodes)
+
+	for ep := 0; ep < cfg.Episodes; ep++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		epSeed := cfg.BaseSeed + uint64(ep)*7919
+
+		// 1. Run V00 (Legacy Action + Blind)
+		s00, err := r.runEpisodeN0(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("factorial: episode %d V00 failed: %w", ep, err)
+		}
+		// 2. Run V01 (Legacy Action + Informed)
+		s01, err := r.runEpisodeN0Informed(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("factorial: episode %d V01 failed: %w", ep, err)
+		}
+		// 3. Run V10 (Competitive Action + Blind)
+		s10, err := r.runEpisodeN1Blind(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("factorial: episode %d V10 failed: %w", ep, err)
+		}
+		// 4. Run V11 (Competitive Action + Informed)
+		s11, err := r.runEpisodeN1(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("factorial: episode %d V11 failed: %w", ep, err)
+		}
+
+		v00[ep] = s00.NetContribution
+		v01[ep] = s01.NetContribution
+		v10[ep] = s10.NetContribution
+		v11[ep] = s11.NetContribution
+	}
+
+	tV11VsV00, _ := pkgmath.ComputePairedTTest(v00, v11)
+	tV11VsV10, _ := pkgmath.ComputePairedTTest(v10, v11)
+	tV10VsV00, _ := pkgmath.ComputePairedTTest(v00, v10)
+	tV01VsV00, _ := pkgmath.ComputePairedTTest(v00, v01)
+
+	mean00 := tV11VsV00.MeanBaseline
+	mean01 := tV01VsV00.MeanCandidate
+	mean10 := tV10VsV00.MeanCandidate
+	mean11 := tV11VsV00.MeanCandidate
+
+	mainAction := 0.5 * ((mean10 - mean00) + (mean11 - mean01))
+	mainInfo := 0.5 * ((mean01 - mean00) + (mean11 - mean10))
+	interaction := mean11 - mean10 - mean01 + mean00
+
+	factorial := FactorialDecomposition2x2{
+		V00_LegacyBlind:           mean00,
+		V01_LegacyInformed:        mean01,
+		V10_CompetitiveBlind:      mean10,
+		V11_CompetitiveInformed:   mean11,
+		MainEffectActionSpace:     mainAction,
+		MainEffectInformation:     mainInfo,
+		InteractionEffect:         interaction,
+		TotalLift:                 mean11 - mean00,
+		ConditionalVoIUnderComp:   mean11 - mean10,
+		ConditionalVoIUnderLegacy: mean01 - mean00,
+	}
+
+	return &FactorialReport2x2{
+		Config:               cfg,
+		Factorial:            factorial,
+		TTestV11VsV00:        tV11VsV00,
+		TTestV11VsV10:        tV11VsV10,
+		TTestV10VsV00:        tV10VsV00,
+		TTestV01VsV00:        tV01VsV00,
+		ExecutionDurationSec: time.Since(startTime).Seconds(),
 	}, nil
 }
 

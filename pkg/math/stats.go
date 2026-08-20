@@ -28,6 +28,10 @@ type PairedTTestResult struct {
 	ConfidenceLow95  float64 // Lower bound of 95% confidence interval for \mu_d
 	ConfidenceHigh95 float64 // Upper bound of 95% confidence interval for \mu_d
 	PercentLift      float64 // (\bar{d} / |\bar{x}_{\text{base}}|) * 100
+	CohensD          float64 // Cohen's d effect size: \bar{d} / s_d
+	WinsCandidate    int     // Number of episodes where Candidate > Baseline
+	WinsBaseline     int     // Number of episodes where Baseline > Candidate
+	Ties             int     // Number of episodes where Candidate == Baseline
 }
 
 // SummaryString formats the test result as a human-readable statistical report.
@@ -38,6 +42,8 @@ func (r PairedTTestResult) SummaryString() string {
 			"  Candidate Mean:  $%.2f\n"+
 			"  Mean Difference: $%.2f (Lift: +%.2f%%)\n"+
 			"  95%% CI:          [$%.2f, $%.2f]\n"+
+			"  Cohen's d:       %.4f\n"+
+			"  Win-Loss-Tie:    %d - %d - %d\n"+
 			"  t-Statistic:     %.4f\n"+
 			"  p-Value (1-tail): %e\n"+
 			"  p-Value (2-tail): %e",
@@ -45,6 +51,8 @@ func (r PairedTTestResult) SummaryString() string {
 		r.MeanBaseline, r.MeanCandidate,
 		r.MeanDifference, r.PercentLift,
 		r.ConfidenceLow95, r.ConfidenceHigh95,
+		r.CohensD,
+		r.WinsCandidate, r.WinsBaseline, r.Ties,
 		r.TStatistic,
 		r.PValueOneTailed,
 		r.PValueTwoTailed,
@@ -120,6 +128,24 @@ func ComputePairedTTest(baseline, candidate []float64) (PairedTTestResult, error
 		percentLift = (meanDiff / math.Abs(meanBase)) * 100.0
 	}
 
+	cohensD := 0.0
+	if stdDevDiff > 1e-15 {
+		cohensD = meanDiff / stdDevDiff
+	}
+
+	winsCand := 0
+	winsBase := 0
+	ties := 0
+	for _, d := range diffs {
+		if d > 1e-6 {
+			winsCand++
+		} else if d < -1e-6 {
+			winsBase++
+		} else {
+			ties++
+		}
+	}
+
 	return PairedTTestResult{
 		N:                n,
 		MeanBaseline:     meanBase,
@@ -134,6 +160,10 @@ func ComputePairedTTest(baseline, candidate []float64) (PairedTTestResult, error
 		ConfidenceLow95:  meanDiff - marginOfError,
 		ConfidenceHigh95: meanDiff + marginOfError,
 		PercentLift:      percentLift,
+		CohensD:          cohensD,
+		WinsCandidate:    winsCand,
+		WinsBaseline:     winsBase,
+		Ties:             ties,
 	}, nil
 }
 

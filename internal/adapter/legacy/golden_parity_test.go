@@ -12,6 +12,8 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
+	"github.com/optimaldynamics/project-mittens/pkg/journal"
+	"github.com/optimaldynamics/project-mittens/pkg/replay"
 )
 
 // getCoreAIRoot locates the legacy Java coreai test fixtures root directory.
@@ -359,5 +361,597 @@ func TestGoldenParity_16OptimalTours(t *testing.T) {
 
 	if multiLegTourCount == 0 {
 		t.Errorf("expected multi-leg chained tours in 16_test_dispatch_optimal_tours")
+	}
+}
+
+// createAndVerifyJournalRecord seals a cryptographic JournalRecord, appends it to a MemoryStore,
+// and asserts Merkle chain continuity and validity (Inviolate 7 & Section 19.4).
+func createAndVerifyJournalRecord[C model.CompetitorScale](
+	t *testing.T,
+	decisionID string,
+	runID string,
+	epoch int64,
+	pol policy.Policy[C],
+	prov policy.DecisionProvenance,
+	state *model.State[C],
+	action *model.Action,
+) (journal.JournalRecord, journal.JournalStore) {
+	t.Helper()
+	initialStateHash, _ := journal.HashState(state)
+	rBytes, _, _ := journal.EncodeCanonicalResource(state.Resource())
+	iBytes, _, _ := journal.EncodeCanonicalInformation(state.Information())
+	bBytes, _, _ := journal.EncodeCanonicalBelief(state.Belief())
+	aBytes, aHash, _ := journal.EncodeCanonicalAction(action)
+
+	paramHash := journal.ComputeSHA256([]byte(pol.Name()))
+	if len(prov.ThetaParameters) > 0 {
+		if pHash, err := journal.HashParameters(prov.ThetaParameters); err == nil {
+			paramHash = pHash
+		}
+	}
+
+	rec := journal.JournalRecord{
+		RunID:                 runID,
+		Epoch:                 epoch,
+		BatchSeq:              1,
+		DecisionID:            decisionID,
+		PrevRecordHash:        journal.GenesisPrevHash,
+		RuntimeVersion:        journal.CurrentRuntimeVersion,
+		PolicyName:            pol.Name(),
+		PolicyParamHash:       paramHash,
+		InitialStateHash:      initialStateHash,
+		ResourceStateBytes:    rBytes,
+		InformationStateBytes: iBytes,
+		BeliefStateBytes:      bBytes,
+		ActionHash:            aHash,
+		ActionBytes:           aBytes,
+		MatchedCount:          action.MatchCount(),
+		EvaluatedArcsCount:    len(prov.EvaluatedArcs),
+		TotalNetContribution:  prov.TotalNetContribution,
+		NextStateHash:         initialStateHash,
+	}
+	rec.Seal()
+
+	store := journal.NewMemoryStore()
+	if err := store.Append(rec); err != nil {
+		t.Fatalf("failed appending cryptographic journal record: %v", err)
+	}
+
+	valid, lastHash, err := store.VerifyRunChain(runID)
+	if !valid || err != nil {
+		t.Fatalf("Merkle chain verification failed for %s: %v", runID, err)
+	}
+	if lastHash != rec.RecordHash {
+		t.Errorf("expected latest hash %s, got %s", rec.RecordHash, lastHash)
+	}
+
+	return rec, store
+}
+
+// TestGoldenParity_13Relays characterises relay exchange synthesis, dual-driver swap handoffs,
+// and Merkle cryptographic journal integrity on the legacy 13_test_relays fixture.
+func TestGoldenParity_13Relays(t *testing.T) {
+	coreaiRoot := getCoreAIRoot(t)
+	scenarioDir := filepath.Join(coreaiRoot, "engine/smart_tl/worker/tests/13_test_relays")
+	inputDir := filepath.Join(scenarioDir, "input")
+
+	locFile := filepath.Join(inputDir, "locations_WR.txt")
+	driverFile := filepath.Join(inputDir, "DRIVERS_NO_OTR_DED_Sampled.txt")
+	loadFile := filepath.Join(inputDir, "RC_AND_WR_LOADS_Sampled.txt")
+	relayFile := filepath.Join(inputDir, "RC_all_relays.txt")
+
+	// 1. Load inputs
+	drivers, loads, _, err := legacy.LoadCarrierScenario(locFile, driverFile, loadFile, 250)
+	if err != nil {
+		t.Fatalf("LoadCarrierScenario failed on 13_test_relays: %v", err)
+	}
+
+	relF, err := os.Open(relayFile)
+	if err != nil {
+		t.Fatalf("cannot open relay file: %v", err)
+	}
+	defer relF.Close()
+	relays, err := legacy.ParseRelays(relF)
+	if err != nil {
+		t.Fatalf("ParseRelays failed: %v", err)
+	}
+
+	t.Logf("Loaded 13_test_relays: %d drivers, %d loads, %d relay nodes", len(drivers), len(loads), len(relays))
+
+	// 2. Configure Go Optimizer dynamically aligned to earliest pickup epoch
+	minPickupEpoch := int64(math.MaxInt64)
+	for _, l := range loads {
+		if l.PickupEarliestEpoch > 0 && l.PickupEarliestEpoch < minPickupEpoch {
+			minPickupEpoch = l.PickupEarliestEpoch
+		}
+	}
+	baseEpoch := minPickupEpoch - 3600
+
+	for i := range drivers {
+		drivers[i].CurrentLocation = drivers[i].HomeLocation
+		drivers[i].AvailableEpoch = baseEpoch
+		drivers[i].Clocks = hos.NewDriverClocks(hos.USPolicySpecs(), time.Unix(baseEpoch, 0))
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, err := model.NewInformationState(baseEpoch, 1.0, 2.50, 0)
+	if err != nil {
+		t.Fatalf("NewInformationState failed: %v", err)
+	}
+	belief := model.NewMonopolisticBelief()
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 1500.0
+	feasCfg.MaxEarlyDwellHours = 120.0
+	feasCfg.MaxLateDeliveryHours = 24.0
+
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		feasCfg,
+		nil,
+	)
+
+	// 3. Evaluate matching
+	action, prov, err := cfaPol.Evaluate(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Go Policy Evaluate failed on 13_test_relays: %v", err)
+	}
+
+	t.Logf("13_test_relays Go Matching: %d matches, Net Contribution: $%.2f",
+		action.MatchCount(), prov.TotalNetContribution)
+
+	if action.MatchCount() == 0 {
+		t.Errorf("expected >0 matches from Go optimizer on 13_test_relays")
+	}
+
+	// 4. Generate Cryptographic Journal Record & verify Merkle continuity
+	record, _ := createAndVerifyJournalRecord(
+		t,
+		"DEC-13-RELAYS-001",
+		"RUN-GOLDEN-13",
+		baseEpoch,
+		cfaPol,
+		prov,
+		state,
+		action,
+	)
+
+	// 5. Offline Bit-Exact Replay Verification (Principle 2)
+	replayEngine, err := replay.NewReplayEngine[model.Monopolistic](cfaPol)
+	if err != nil {
+		t.Fatalf("NewReplayEngine failed: %v", err)
+	}
+
+	report, err := replayEngine.ReplayDecision(context.Background(), record, state)
+	if err != nil {
+		t.Fatalf("ReplayDecision failed: %v", err)
+	}
+	if !report.IsBitExact {
+		t.Fatalf("expected bit-exact replay on 13_test_relays, got drift: %v", report.DriftDetails)
+	}
+	if !report.InitialStateHashMatch || !report.ActionHashMatch {
+		t.Errorf("expected state and action hash match during replay")
+	}
+}
+
+// TestGoldenParity_05HomeTime evaluates driver time-at-home deadlines, rest dwell,
+// and domicile returns on the legacy 05_test_home_time fixture.
+func TestGoldenParity_05HomeTime(t *testing.T) {
+	coreaiRoot := getCoreAIRoot(t)
+	scenarioDir := filepath.Join(coreaiRoot, "engine/smart_tl/worker/tests/05_test_home_time")
+	inputDir := filepath.Join(scenarioDir, "input")
+
+	locFile := filepath.Join(inputDir, "locations_out.txt")
+	driverFile := filepath.Join(inputDir, "drivers_1_custom.txt")
+	loadFile := filepath.Join(inputDir, "loads.txt")
+	tahFile := filepath.Join(inputDir, "driverTAHSchedules.txt")
+
+	// 1. Load inputs
+	drivers, loads, _, err := legacy.LoadCarrierScenario(locFile, driverFile, loadFile, 100)
+	if err != nil {
+		t.Fatalf("LoadCarrierScenario failed on 05_test_home_time: %v", err)
+	}
+
+	tahF, err := os.Open(tahFile)
+	if err != nil {
+		t.Fatalf("cannot open TAH file: %v", err)
+	}
+	defer tahF.Close()
+	schedules, err := legacy.ParseTimeAtHomeSchedules(tahF)
+	if err != nil {
+		t.Fatalf("ParseTimeAtHomeSchedules failed: %v", err)
+	}
+
+	t.Logf("Loaded 05_test_home_time: %d drivers, %d loads, %d TAH driver schedules",
+		len(drivers), len(loads), len(schedules))
+
+	// 2. Configure Go Optimizer dynamically aligned to earliest pickup epoch
+	minPickupEpoch := int64(math.MaxInt64)
+	for _, l := range loads {
+		if l.PickupEarliestEpoch > 0 && l.PickupEarliestEpoch < minPickupEpoch {
+			minPickupEpoch = l.PickupEarliestEpoch
+		}
+	}
+	baseEpoch := minPickupEpoch - 3600
+
+	for i := range drivers {
+		drivers[i].CurrentLocation = drivers[i].HomeLocation
+		drivers[i].AvailableEpoch = baseEpoch
+		drivers[i].Clocks = hos.NewDriverClocks(hos.USPolicySpecs(), time.Unix(baseEpoch, 0))
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, err := model.NewInformationState(baseEpoch, 1.0, 2.50, 0)
+	if err != nil {
+		t.Fatalf("NewInformationState failed: %v", err)
+	}
+	belief := model.NewMonopolisticBelief()
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 1500.0
+	feasCfg.MaxEarlyDwellHours = 120.0
+	feasCfg.MaxLateDeliveryHours = 24.0
+
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		feasCfg,
+		nil,
+	)
+
+	// 3. Evaluate matching
+	action, prov, err := cfaPol.Evaluate(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Go Policy Evaluate failed on 05_test_home_time: %v", err)
+	}
+
+	t.Logf("05_test_home_time Go Matching: %d matches, Net Contribution: $%.2f",
+		action.MatchCount(), prov.TotalNetContribution)
+
+	if action.MatchCount() == 0 {
+		t.Errorf("expected >0 matches from Go optimizer on 05_test_home_time")
+	}
+
+	// 4. Generate Cryptographic Journal & Replay Audit
+	record, _ := createAndVerifyJournalRecord(
+		t,
+		"DEC-05-HOMETIME-001",
+		"RUN-GOLDEN-05",
+		baseEpoch,
+		cfaPol,
+		prov,
+		state,
+		action,
+	)
+
+	replayEngine, err := replay.NewReplayEngine[model.Monopolistic](cfaPol)
+	if err != nil {
+		t.Fatalf("NewReplayEngine failed: %v", err)
+	}
+
+	report, err := replayEngine.ReplayDecision(context.Background(), record, state)
+	if err != nil {
+		t.Fatalf("ReplayDecision failed: %v", err)
+	}
+	if !report.IsBitExact {
+		t.Fatalf("expected bit-exact replay on 05_test_home_time, got drift: %v", report.DriftDetails)
+	}
+}
+
+// TestGoldenParity_14PreAssignments evaluates committed freight bindings, must-dispatch preassignments,
+// and residual open freight on the legacy 14_test_pre_assignments fixture.
+func TestGoldenParity_14PreAssignments(t *testing.T) {
+	coreaiRoot := getCoreAIRoot(t)
+	scenarioDir := filepath.Join(coreaiRoot, "engine/smart_tl/worker/tests/14_test_pre_assignments")
+	inputDir := filepath.Join(scenarioDir, "input")
+
+	locFile := filepath.Join(inputDir, "locations.txt")
+	driverFile := filepath.Join(inputDir, "drivers.txt")
+	loadFile := filepath.Join(inputDir, "loads.txt")
+	preFile := filepath.Join(inputDir, "preassignments.txt")
+
+	// 1. Load inputs
+	drivers, loads, _, err := legacy.LoadCarrierScenario(locFile, driverFile, loadFile, 150)
+	if err != nil {
+		t.Fatalf("LoadCarrierScenario failed on 14_test_pre_assignments: %v", err)
+	}
+
+	preF, err := os.Open(preFile)
+	if err != nil {
+		t.Fatalf("cannot open preassignments file: %v", err)
+	}
+	defer preF.Close()
+	preMap, err := legacy.ParsePreAssignments(preF)
+	if err != nil {
+		t.Fatalf("ParsePreAssignments failed: %v", err)
+	}
+
+	t.Logf("Loaded 14_test_pre_assignments: %d drivers, %d loads, %d preassignments",
+		len(drivers), len(loads), len(preMap))
+
+	// 2. Configure Go Optimizer dynamically aligned to earliest pickup epoch
+	minPickupEpoch := int64(math.MaxInt64)
+	for _, l := range loads {
+		if l.PickupEarliestEpoch > 0 && l.PickupEarliestEpoch < minPickupEpoch {
+			minPickupEpoch = l.PickupEarliestEpoch
+		}
+	}
+	baseEpoch := minPickupEpoch - 2*3600
+
+	for i := range drivers {
+		drivers[i].CurrentLocation = drivers[i].HomeLocation
+		drivers[i].AvailableEpoch = baseEpoch
+		drivers[i].Clocks = hos.NewDriverClocks(hos.USPolicySpecs(), time.Unix(baseEpoch, 0))
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, err := model.NewInformationState(baseEpoch, 1.0, 2.50, 0)
+	if err != nil {
+		t.Fatalf("NewInformationState failed: %v", err)
+	}
+	belief := model.NewMonopolisticBelief()
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 1500.0
+	feasCfg.MaxEarlyDwellHours = 120.0
+	feasCfg.MaxLateDeliveryHours = 72.0
+
+	costCfg := model.DefaultCostConfig()
+	costCfg.EarlyArrivalPerHour = 0.0
+
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		costCfg,
+		feasCfg,
+		nil,
+	)
+
+	// 3. Evaluate matching
+	action, prov, err := cfaPol.Evaluate(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Go Policy Evaluate failed on 14_test_pre_assignments: %v", err)
+	}
+
+	t.Logf("14_test_pre_assignments Go Matching: %d matches, Net Contribution: $%.2f",
+		action.MatchCount(), prov.TotalNetContribution)
+
+	if action.MatchCount() == 0 {
+		t.Errorf("expected >0 matches from Go optimizer on 14_test_pre_assignments")
+	}
+
+	// 4. Generate Cryptographic Journal & Replay Audit
+	record, _ := createAndVerifyJournalRecord(
+		t,
+		"DEC-14-PREASSIGN-001",
+		"RUN-GOLDEN-14",
+		baseEpoch,
+		cfaPol,
+		prov,
+		state,
+		action,
+	)
+
+	replayEngine, err := replay.NewReplayEngine[model.Monopolistic](cfaPol)
+	if err != nil {
+		t.Fatalf("NewReplayEngine failed: %v", err)
+	}
+
+	report, err := replayEngine.ReplayDecision(context.Background(), record, state)
+	if err != nil {
+		t.Fatalf("ReplayDecision failed: %v", err)
+	}
+	if !report.IsBitExact {
+		t.Fatalf("expected bit-exact replay on 14_test_pre_assignments, got drift: %v", report.DriftDetails)
+	}
+}
+
+// TestGoldenParity_17DriverGeoConstraints evaluates driver regional operational boundaries,
+// geographic domain filtering, and uncovered loads on the legacy 17_test_driver_geo_constraints fixture.
+func TestGoldenParity_17DriverGeoConstraints(t *testing.T) {
+	coreaiRoot := getCoreAIRoot(t)
+	scenarioDir := filepath.Join(coreaiRoot, "engine/smart_tl/worker/tests/17_test_driver_geo_constraints")
+	inputDir := filepath.Join(scenarioDir, "input")
+
+	locFile := filepath.Join(inputDir, "locations.txt")
+	driverFile := filepath.Join(inputDir, "drivers.txt")
+	loadFile := filepath.Join(inputDir, "loads.txt")
+
+	// 1. Load inputs
+	drivers, loads, _, err := legacy.LoadCarrierScenario(locFile, driverFile, loadFile, 200)
+	if err != nil {
+		t.Fatalf("LoadCarrierScenario failed on 17_test_driver_geo_constraints: %v", err)
+	}
+
+	t.Logf("Loaded 17_test_driver_geo_constraints: %d drivers, %d loads", len(drivers), len(loads))
+
+	// 2. Configure Go Optimizer dynamically aligned to earliest pickup epoch
+	minPickupEpoch := int64(math.MaxInt64)
+	for _, l := range loads {
+		if l.PickupEarliestEpoch > 0 && l.PickupEarliestEpoch < minPickupEpoch {
+			minPickupEpoch = l.PickupEarliestEpoch
+		}
+	}
+	baseEpoch := minPickupEpoch - 2*3600
+
+	for i := range drivers {
+		drivers[i].CurrentLocation = drivers[i].HomeLocation
+		drivers[i].AvailableEpoch = baseEpoch
+		drivers[i].Clocks = hos.NewDriverClocks(hos.USPolicySpecs(), time.Unix(baseEpoch, 0))
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, err := model.NewInformationState(baseEpoch, 1.0, 2.50, 0)
+	if err != nil {
+		t.Fatalf("NewInformationState failed: %v", err)
+	}
+	belief := model.NewMonopolisticBelief()
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 1500.0
+	feasCfg.MaxEarlyDwellHours = 120.0
+	feasCfg.MaxLateDeliveryHours = 72.0
+
+	costCfg := model.DefaultCostConfig()
+	costCfg.EarlyArrivalPerHour = 0.0
+
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		costCfg,
+		feasCfg,
+		nil,
+	)
+
+	// 3. Evaluate matching
+	action, prov, err := cfaPol.Evaluate(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Go Policy Evaluate failed on 17_test_driver_geo_constraints: %v", err)
+	}
+
+	t.Logf("17_test_driver_geo_constraints Go Matching: %d matches, Net Contribution: $%.2f",
+		action.MatchCount(), prov.TotalNetContribution)
+
+	if action.MatchCount() == 0 {
+		t.Errorf("expected >0 matches from Go optimizer on 17_test_driver_geo_constraints")
+	}
+
+	// 4. Generate Cryptographic Journal & Replay Audit
+	record, _ := createAndVerifyJournalRecord(
+		t,
+		"DEC-17-GEOCONSTR-001",
+		"RUN-GOLDEN-17",
+		baseEpoch,
+		cfaPol,
+		prov,
+		state,
+		action,
+	)
+
+	replayEngine, err := replay.NewReplayEngine[model.Monopolistic](cfaPol)
+	if err != nil {
+		t.Fatalf("NewReplayEngine failed: %v", err)
+	}
+
+	report, err := replayEngine.ReplayDecision(context.Background(), record, state)
+	if err != nil {
+		t.Fatalf("ReplayDecision failed: %v", err)
+	}
+	if !report.IsBitExact {
+		t.Fatalf("expected bit-exact replay on 17_test_driver_geo_constraints, got drift: %v", report.DriftDetails)
+	}
+}
+
+// TestGoldenParity_15OnTimeParameters evaluates rolling 10-day HOS historical logs and
+// tight delivery appointment windows on the legacy 15_test_on_time_parameters fixture.
+func TestGoldenParity_15OnTimeParameters(t *testing.T) {
+	coreaiRoot := getCoreAIRoot(t)
+	scenarioDir := filepath.Join(coreaiRoot, "engine/smart_tl/worker/tests/15_test_on_time_parameters")
+	inputDir := filepath.Join(scenarioDir, "input")
+
+	locFile := filepath.Join(inputDir, "locations_out.txt")
+	driverFile := filepath.Join(inputDir, "drivers_1_custom.txt")
+	loadFile := filepath.Join(inputDir, "loads-new.txt")
+
+	// 1. Load inputs
+	drivers, loads, _, err := legacy.LoadCarrierScenario(locFile, driverFile, loadFile, 150)
+	if err != nil {
+		t.Fatalf("LoadCarrierScenario failed on 15_test_on_time_parameters: %v", err)
+	}
+
+	t.Logf("Loaded 15_test_on_time_parameters: %d drivers, %d loads", len(drivers), len(loads))
+
+	// 2. Configure Go Optimizer dynamically aligned to earliest pickup epoch
+	minPickupEpoch := int64(math.MaxInt64)
+	for _, l := range loads {
+		if l.PickupEarliestEpoch > 0 && l.PickupEarliestEpoch < minPickupEpoch {
+			minPickupEpoch = l.PickupEarliestEpoch
+		}
+	}
+	baseEpoch := minPickupEpoch - 2*3600
+
+	for i := range drivers {
+		drivers[i].CurrentLocation = drivers[i].HomeLocation
+		drivers[i].AvailableEpoch = baseEpoch
+		drivers[i].Clocks = hos.NewDriverClocks(hos.USPolicySpecs(), time.Unix(baseEpoch, 0))
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, err := model.NewInformationState(baseEpoch, 1.0, 2.50, 0)
+	if err != nil {
+		t.Fatalf("NewInformationState failed: %v", err)
+	}
+	belief := model.NewMonopolisticBelief()
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 1500.0
+	feasCfg.MaxEarlyDwellHours = 120.0
+	feasCfg.MaxLateDeliveryHours = 72.0
+
+	costCfg := model.DefaultCostConfig()
+	costCfg.EarlyArrivalPerHour = 0.0
+
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		costCfg,
+		feasCfg,
+		nil,
+	)
+
+	// 3. Evaluate matching
+	action, prov, err := cfaPol.Evaluate(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Go Policy Evaluate failed on 15_test_on_time_parameters: %v", err)
+	}
+
+	t.Logf("15_test_on_time_parameters Go Matching: %d matches, Net Contribution: $%.2f",
+		action.MatchCount(), prov.TotalNetContribution)
+
+	if action.MatchCount() == 0 {
+		t.Errorf("expected >0 matches from Go optimizer on 15_test_on_time_parameters")
+	}
+
+	// 4. Generate Cryptographic Journal & Replay Audit
+	record, _ := createAndVerifyJournalRecord(
+		t,
+		"DEC-15-ONTIME-001",
+		"RUN-GOLDEN-15",
+		baseEpoch,
+		cfaPol,
+		prov,
+		state,
+		action,
+	)
+
+	replayEngine, err := replay.NewReplayEngine[model.Monopolistic](cfaPol)
+	if err != nil {
+		t.Fatalf("NewReplayEngine failed: %v", err)
+	}
+
+	report, err := replayEngine.ReplayDecision(context.Background(), record, state)
+	if err != nil {
+		t.Fatalf("ReplayDecision failed: %v", err)
+	}
+	if !report.IsBitExact {
+		t.Fatalf("expected bit-exact replay on 15_test_on_time_parameters, got drift: %v", report.DriftDetails)
 	}
 }

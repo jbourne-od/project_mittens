@@ -132,6 +132,9 @@ paths:
           description: Decision not found
           content:
             application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/v1/decisions/{id}/replay:
     post:
       summary: Offline deterministic decision replay & cryptographic verification
@@ -177,6 +180,119 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChainIntegrityResponseDTO'
+
+  /api/v1/stream/telemetry:
+    post:
+      summary: Ingest batch of live ELD driver telemetry pings
+      description: Ingests GPS locations, available timestamps, and remaining HOS driving/duty clocks into the streaming buffer.
+      operationId: ingestDriverTelemetry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamTelemetryRequestDTO'
+      responses:
+        '200':
+          description: Current stream buffer status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamStatusResponseDTO'
+        '400':
+          description: Invalid telemetry payload or validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/stream/tenders:
+    post:
+      summary: Ingest batch of live TMS customer freight load tenders
+      description: Ingests real-time EDI 204 or TMS freight tenders into the stream buffer with spatial/temporal constraints.
+      operationId: ingestLoadTenders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamTendersRequestDTO'
+      responses:
+        '200':
+          description: Current stream buffer status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamStatusResponseDTO'
+        '400':
+          description: Invalid tender payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/stream/cancels:
+    post:
+      summary: Ingest load tender cancellation signals
+      description: Cancels previously buffered or active freight tenders prior to physical dispatch commitment.
+      operationId: cancelLoadTenders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamCancelsRequestDTO'
+      responses:
+        '200':
+          description: Current stream buffer status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamStatusResponseDTO'
+        '400':
+          description: Invalid cancellation payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/stream/status:
+    get:
+      summary: Get streaming ingestion buffer health and queue depths
+      description: Returns buffer metrics including queued driver pings, active tenders, and ingest timestamp telemetry.
+      operationId: getStreamStatus
+      responses:
+        '200':
+          description: Stream buffer operational indicators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamStatusResponseDTO'
+
+  /api/v1/reposition/plan:
+    post:
+      summary: Synthesize multi-region empty fleet repositioning plan
+      description: Evaluates regional supply/demand imbalances and computes HOS-compliant empty repositioning moves to high-demand clusters.
+      operationId: planFleetRepositioning
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RepositionPlanRequestDTO'
+      responses:
+        '200':
+          description: Recommended empty repositioning moves and net arbitrage summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepositionPlanResponseDTO'
+        '400':
+          description: Invalid repositioning request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /healthz:
     get:
@@ -743,4 +859,326 @@ components:
         status:
           type: string
           example: "VALID"
+
+    ELDDriverPingDTO:
+      type: object
+      required:
+        - driver_id
+        - timestamp
+        - lat
+        - lon
+        - drive_hours_remaining
+        - duty_hours_remaining
+      properties:
+        driver_id:
+          type: string
+          example: "DRV-101"
+        timestamp:
+          type: integer
+          format: int64
+          example: 1787126400
+        lat:
+          type: number
+          format: double
+          example: 41.8781
+        lon:
+          type: number
+          format: double
+          example: -87.6298
+        node_id:
+          type: string
+          example: "CHI"
+        drive_hours_remaining:
+          type: number
+          format: double
+          example: 9.5
+        duty_hours_remaining:
+          type: number
+          format: double
+          example: 12.0
+        pta_epoch:
+          type: integer
+          format: int64
+          example: 1787130000
+        assigned_load_id:
+          type: string
+        equipment_type:
+          type: string
+          example: "DRY_VAN"
+        endorsements:
+          type: array
+          items:
+            type: string
+
+    TMSLoadTenderDTO:
+      type: object
+      required:
+        - load_id
+        - timestamp
+        - origin_lat
+        - origin_lon
+        - dest_lat
+        - dest_lon
+        - pickup_earliest_epoch
+        - pickup_latest_epoch
+        - delivery_earliest_epoch
+        - delivery_latest_epoch
+        - revenue
+      properties:
+        load_id:
+          type: string
+          example: "TENDER-501"
+        timestamp:
+          type: integer
+          format: int64
+          example: 1787126400
+        origin_node_id:
+          type: string
+          example: "CHI"
+        origin_lat:
+          type: number
+          format: double
+          example: 41.8781
+        origin_lon:
+          type: number
+          format: double
+          example: -87.6298
+        destination_node_id:
+          type: string
+          example: "ATL"
+        dest_lat:
+          type: number
+          format: double
+          example: 33.7490
+        dest_lon:
+          type: number
+          format: double
+          example: -84.3880
+        pickup_earliest_epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        pickup_latest_epoch:
+          type: integer
+          format: int64
+          example: 1787169600
+        delivery_earliest_epoch:
+          type: integer
+          format: int64
+          example: 1787169600
+        delivery_latest_epoch:
+          type: integer
+          format: int64
+          example: 1787212800
+        revenue:
+          type: number
+          format: double
+          example: 2200.00
+        required_equipment:
+          type: string
+          example: "DRY_VAN"
+        required_endorsements:
+          type: array
+          items:
+            type: string
+
+    TenderCancelDTO:
+      type: object
+      required:
+        - load_id
+        - timestamp
+      properties:
+        load_id:
+          type: string
+          example: "TENDER-501"
+        reason:
+          type: string
+          example: "Shipper canceled order"
+        timestamp:
+          type: integer
+          format: int64
+          example: 1787126500
+
+    StreamStatusDTO:
+      type: object
+      required:
+        - buffered_driver_pings
+        - buffered_tenders_count
+        - buffered_cancellations
+        - total_pings_ingested
+        - total_tenders_ingested
+      properties:
+        buffered_driver_pings:
+          type: integer
+          example: 12
+        buffered_tenders_count:
+          type: integer
+          example: 45
+        buffered_cancellations:
+          type: integer
+          example: 1
+        last_ingest_timestamp:
+          type: integer
+          format: int64
+          example: 1787126500
+        last_sync_timestamp:
+          type: integer
+          format: int64
+          example: 1787126400
+        total_pings_ingested:
+          type: integer
+          example: 1540
+        total_tenders_ingested:
+          type: integer
+          example: 320
+
+    StreamTelemetryRequestDTO:
+      type: object
+      required:
+        - pings
+      properties:
+        pings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ELDDriverPingDTO'
+
+    StreamTendersRequestDTO:
+      type: object
+      required:
+        - tenders
+      properties:
+        tenders:
+          type: array
+          items:
+            $ref: '#/components/schemas/TMSLoadTenderDTO'
+
+    StreamCancelsRequestDTO:
+      type: object
+      required:
+        - cancellations
+      properties:
+        cancellations:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenderCancelDTO'
+
+    StreamStatusResponseDTO:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/StreamStatusDTO'
+
+    RepositioningMove:
+      type: object
+      required:
+        - driver_id
+        - origin_location
+        - target_region_id
+        - target_location
+        - start_epoch
+        - arrival_epoch
+        - deadhead_miles
+        - estimated_cost
+        - expected_arbitrage_yield
+        - net_repositioning_value
+      properties:
+        driver_id:
+          type: string
+          example: "DRV-CLT-01"
+        origin_location:
+          $ref: '#/components/schemas/LocationDTO'
+        target_region_id:
+          type: string
+          example: "SE_ATL"
+        target_location:
+          $ref: '#/components/schemas/LocationDTO'
+        start_epoch:
+          type: integer
+          format: int64
+          example: 1787126400
+        arrival_epoch:
+          type: integer
+          format: int64
+          example: 1787142600
+        deadhead_miles:
+          type: number
+          format: double
+          example: 226.2
+        estimated_cost:
+          type: number
+          format: double
+          example: 418.47
+        expected_arbitrage_yield:
+          type: number
+          format: double
+          example: 2800.00
+        net_repositioning_value:
+          type: number
+          format: double
+          example: 1581.53
+
+    RepositioningConfig:
+      type: object
+      properties:
+        max_reposition_distance_miles:
+          type: number
+          format: double
+          example: 450.0
+        empty_mile_cost_rate:
+          type: number
+          format: double
+          example: 1.85
+        min_arbitrage_threshold:
+          type: number
+          format: double
+          example: 150.0
+        deficit_hurdle:
+          type: integer
+          example: 1
+        average_transit_speed_mph:
+          type: number
+          format: double
+          example: 50.0
+        default_regional_yield:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+
+    RepositionPlanRequestDTO:
+      type: object
+      required:
+        - drivers
+        - loads
+      properties:
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriverDTO'
+        loads:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoadDTO'
+        config:
+          $ref: '#/components/schemas/RepositioningConfig'
+
+    RepositionPlanResponseDTO:
+      type: object
+      required:
+        - moves
+        - total_moves
+        - summary
+      properties:
+        moves:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepositioningMove'
+        total_moves:
+          type: integer
+          example: 2
+        summary:
+          type: string
+          example: "Recommended 2 repositioning moves (Total Deadhead Cost: $836.94, Expected Net Lift: $3163.06)"
 

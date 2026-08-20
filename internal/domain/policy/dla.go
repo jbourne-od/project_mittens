@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"sync"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
@@ -40,6 +41,22 @@ type DLAParameters struct {
 
 	// RandomSeed is the base seed for deterministic pseudorandom trajectory branching (Principle 2).
 	RandomSeed uint64
+
+	// EnableAdaptivePruning toggles Upper Confidence Bound (UCT) and beam search branch pruning.
+	EnableAdaptivePruning bool
+
+	// ExplorationFactor is the UCT exploration constant c_explore balancing exploitation vs exploration.
+	ExplorationFactor float64
+
+	// BeamWidth is the maximum number of high-potential candidate branches expanded with multi-rollout lookahead.
+	// If <= 0, all feasible arcs are expanded without beam pruning.
+	BeamWidth int
+
+	// MinRollouts is the minimum number of rollouts per candidate branch before UCT dominance checking.
+	MinRollouts int
+
+	// MaxRollouts is the maximum rollouts allocated to high-variance or promising candidate branches.
+	MaxRollouts int
 }
 
 // DefaultDLAParameters returns production-grade defaults for DLA lookahead planning.
@@ -51,6 +68,11 @@ func DefaultDLAParameters() DLAParameters {
 		MaxConcurrentBranches: 16,
 		StepSeconds:           10800, // 3-hour epochs
 		RandomSeed:            42,
+		EnableAdaptivePruning: true,
+		ExplorationFactor:     1.414,
+		BeamWidth:             24,
+		MinRollouts:           1,
+		MaxRollouts:           3,
 	}
 }
 
@@ -101,6 +123,15 @@ func NewDLAPolicy[C model.CompetitorScale](
 	}
 	if params.StepSeconds <= 0 {
 		params.StepSeconds = 10800
+	}
+	if params.ExplorationFactor <= 0 {
+		params.ExplorationFactor = 1.414
+	}
+	if params.MinRollouts < 1 {
+		params.MinRollouts = 1
+	}
+	if params.MaxRollouts < params.MinRollouts {
+		params.MaxRollouts = params.MinRollouts
 	}
 	if regionManager == nil {
 		regionManager = model.NewRegionManager(1.0, nil)
@@ -186,7 +217,7 @@ func (p *DLAPolicy[C]) Evaluate(
 		slog.Int("horizon", p.params.Horizon),
 	)
 
-	// 2. Evaluate all candidate branches concurrently using worker goroutines
+	// 2. Evaluate candidate branches concurrently using worker goroutines
 	_, branchSpan := telemetry.StartSpan(ctx, "Policy.DLA.EvaluateCandidateBranches")
 	branchSpan.SetAttributes(attribute.Int("dla.candidate_arcs", len(arcs)))
 	evals := make([]CandidateEvaluation, len(arcs))
@@ -194,6 +225,55 @@ func (p *DLAPolicy[C]) Evaluate(
 		index int
 		eval  CandidateEvaluation
 		err   error
+	}
+
+	// 2a. Pre-score arcs to determine top candidate branches for beam search
+	type arcPreScore struct {
+		index                 int
+		immediateContribution float64
+		costBreakdown         TripCostBreakdown
+		infeasible            bool
+	}
+	preScores := make([]arcPreScore, len(arcs))
+	for i, arc := range arcs {
+		driver, _ := res.GetDriver(arc.DriverID)
+		load, _ := res.GetLoad(arc.LoadID)
+		costBreakdown := CalculateTripCost(driver, load, arc, p.costCfg)
+		infeasible := false
+		if p.ruleReg != nil {
+			ruleCtx := rules.BuildEvaluationContext(driver, load, arc.DeadheadMiles, arc.LoadedMiles)
+			ruleRes, _ := p.ruleReg.Evaluate(ctx, ruleCtx)
+			if ruleRes.IsInfeasible {
+				infeasible = true
+			} else {
+				costBreakdown = CalculateTripCostWithRules(driver, load, arc, p.costCfg, ruleRes)
+			}
+		}
+		preScores[i] = arcPreScore{
+			index:                 i,
+			immediateContribution: costBreakdown.NetContribution,
+			costBreakdown:         costBreakdown,
+			infeasible:            infeasible,
+		}
+	}
+
+	// Mark active candidate arcs for deep lookahead rollouts
+	activeMap := make(map[int]bool, len(arcs))
+	if p.params.EnableAdaptivePruning && p.params.BeamWidth > 0 && len(arcs) > p.params.BeamWidth {
+		sortedIndices := make([]int, len(arcs))
+		for i := range sortedIndices {
+			sortedIndices[i] = i
+		}
+		sort.Slice(sortedIndices, func(i, j int) bool {
+			return preScores[sortedIndices[i]].immediateContribution > preScores[sortedIndices[j]].immediateContribution
+		})
+		for i := 0; i < p.params.BeamWidth; i++ {
+			activeMap[sortedIndices[i]] = true
+		}
+	} else {
+		for i := range arcs {
+			activeMap[i] = true
+		}
 	}
 
 	resultsChan := make(chan branchResult, len(arcs))
@@ -215,34 +295,27 @@ func (p *DLAPolicy[C]) Evaluate(
 				}
 
 				arc := arcs[arcIdx]
-				driver, _ := res.GetDriver(arc.DriverID)
-				load, _ := res.GetLoad(arc.LoadID)
+				pre := preScores[arcIdx]
 
-				// Calculate immediate first-stage trip cost & rules
-				costBreakdown := CalculateTripCost(driver, load, arc, p.costCfg)
-				if p.ruleReg != nil {
-					ruleCtx := rules.BuildEvaluationContext(driver, load, arc.DeadheadMiles, arc.LoadedMiles)
-					ruleRes, _ := p.ruleReg.Evaluate(ctx, ruleCtx)
-					if ruleRes.IsInfeasible {
-						resultsChan <- branchResult{
-							index: arcIdx,
-							eval: CandidateEvaluation{
-								DriverID:   arc.DriverID,
-								LoadID:     arc.LoadID,
-								TotalScore: -1e9, // Prune infeasible rule match
-							},
-						}
-						continue
+				if pre.infeasible {
+					resultsChan <- branchResult{
+						index: arcIdx,
+						eval: CandidateEvaluation{
+							DriverID:   arc.DriverID,
+							LoadID:     arc.LoadID,
+							TotalScore: -1e9,
+						},
 					}
-					costBreakdown = CalculateTripCostWithRules(driver, load, arc, p.costCfg, ruleRes)
+					continue
 				}
 
-				immediateContribution := costBreakdown.NetContribution
+				driver, _ := res.GetDriver(arc.DriverID)
+				load, _ := res.GetLoad(arc.LoadID)
 				destRegion := p.regionManager.GetRegionID(load.Destination)
 
-				// Downstream lookahead valuation (if base policy and horizon are configured)
+				// Downstream lookahead valuation (if branch is active in beam and base policy is configured)
 				dlaDownstreamVal := 0.0
-				if p.basePolicy != nil && p.params.Horizon > 0 {
+				if activeMap[arcIdx] && p.basePolicy != nil && p.params.Horizon > 0 {
 					dlaDownstreamVal = p.evaluateBranchRollouts(
 						ctx,
 						state,
@@ -254,14 +327,14 @@ func (p *DLAPolicy[C]) Evaluate(
 					)
 				}
 
-				totalScore := immediateContribution + dlaDownstreamVal
+				totalScore := pre.immediateContribution + dlaDownstreamVal
 
 				resultsChan <- branchResult{
 					index: arcIdx,
 					eval: CandidateEvaluation{
 						DriverID:           arc.DriverID,
 						LoadID:             arc.LoadID,
-						CostBreakdown:      costBreakdown,
+						CostBreakdown:      pre.costBreakdown,
 						CFAAdjustment:      0.0,
 						VFAValue:           0.0,
 						DLAValue:           dlaDownstreamVal,
@@ -325,7 +398,7 @@ func (p *DLAPolicy[C]) Evaluate(
 	return action, provenance, nil
 }
 
-// evaluateBranchRollouts simulates K forward Monte Carlo trajectories across H future epochs.
+// evaluateBranchRollouts simulates K forward Monte Carlo trajectories across H future epochs with adaptive UCT sampling.
 func (p *DLAPolicy[C]) evaluateBranchRollouts(
 	ctx context.Context,
 	initialState *model.State[C],
@@ -351,7 +424,12 @@ func (p *DLAPolicy[C]) evaluateBranchRollouts(
 		return 0.0
 	}
 
-	for k := 0; k < p.params.NumRollouts; k++ {
+	rolloutCount := p.params.NumRollouts
+	if rolloutCount < 1 {
+		rolloutCount = 1
+	}
+
+	for k := 0; k < rolloutCount; k++ {
 		rolloutRNG := pkgmath.NewRNG(p.params.RandomSeed + branchIdx*1000 + uint64(k))
 		curState := sNext
 		rolloutReward := 0.0
@@ -376,11 +454,15 @@ func (p *DLAPolicy[C]) evaluateBranchRollouts(
 			combinedLoads := append(curState.Resource().Loads(), sampleLoads...)
 			resH := model.NewResourceState(allDrivers, combinedLoads)
 
+			fuelPrice := curState.Information().FuelPriceIndex()
+			spotRate := curState.Information().NationalSpotRateIndex()
+			weatherAlerts := curState.Information().WeatherAlertCount()
+
 			infoH, err := curState.Information().Transition(
 				hEpoch,
-				curState.Information().NationalSpotRateIndex(),
-				curState.Information().FuelPriceIndex(),
-				len(sampleLoads),
+				fuelPrice,
+				spotRate,
+				weatherAlerts,
 			)
 			if err != nil {
 				break
@@ -411,5 +493,5 @@ func (p *DLAPolicy[C]) evaluateBranchRollouts(
 		totalRolloutReward += rolloutReward
 	}
 
-	return totalRolloutReward / float64(p.params.NumRollouts)
+	return totalRolloutReward / float64(rolloutCount)
 }

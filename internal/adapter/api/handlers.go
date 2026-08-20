@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/optimaldynamics/project-mittens/internal/adapter/stream"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
+	"github.com/optimaldynamics/project-mittens/internal/domain/policy/reposition"
 	"github.com/optimaldynamics/project-mittens/internal/service"
 	"github.com/optimaldynamics/project-mittens/internal/service/dispatch"
 	"github.com/optimaldynamics/project-mittens/pkg/explain"
@@ -45,9 +47,12 @@ type ServerState struct {
 
 // Handler provides HTTP request handling methods.
 type Handler struct {
-	state       *ServerState
-	journal     service.Journal
-	cryptoStore pkgjournal.JournalStore
+	state           *ServerState
+	journal         service.Journal
+	cryptoStore     pkgjournal.JournalStore
+	streamBuffer    *stream.StreamBuffer
+	streamSync      *stream.StateSynchronizer
+	repositionSynth *reposition.RepositioningSynthesizer
 }
 
 // NewHandler initializes a new Handler with an optional Semantic Journal instance.
@@ -58,12 +63,16 @@ func NewHandler(journal ...service.Journal) *Handler {
 	} else {
 		j = service.NewMemoryJournal()
 	}
+	buf := stream.NewStreamBuffer()
 	return &Handler{
 		state: &ServerState{
 			StartTime: time.Now().UTC(),
 		},
-		journal:     j,
-		cryptoStore: pkgjournal.NewMemoryStore(),
+		journal:         j,
+		cryptoStore:     pkgjournal.NewMemoryStore(),
+		streamBuffer:    buf,
+		streamSync:      stream.NewStateSynchronizer(buf),
+		repositionSynth: reposition.NewRepositioningSynthesizer(),
 	}
 }
 
@@ -206,7 +215,7 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 		nil,
 	)
 
-	optService := service.NewOptimizationService[model.Monopolistic](h.journal, nil)
+	optService := service.NewOptimizationService[model.Monopolistic](h.journal, nil).WithCryptoStore(h.cryptoStore)
 	action, prov, _, err := optService.OptimizeEpoch(ctx, state, cfaPol, req.Epoch+3600, nil)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "OPTIMIZATION_FAILED", err.Error())
@@ -475,7 +484,7 @@ func (h *Handler) HandleExplainDecision(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// HandleReplayDecision performs an offline, bit-exact re-evaluation of a past decision.
+// HandleReplayDecision executes an offline bit-exact re-evaluation of a recorded optimization decision.
 func (h *Handler) HandleReplayDecision(w http.ResponseWriter, r *http.Request) {
 	ctx, span := telemetry.StartSpan(r.Context(), "HTTP.POST.api.v1.decisions.replay")
 	defer span.End()
@@ -529,13 +538,8 @@ func (h *Handler) HandleReplayDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policyParams := policy.DefaultCFAParameters()
-	if len(entry.Provenance.ThetaParameters) > 0 {
-		policyParams = policy.CFAParametersFromSlice(entry.Provenance.ThetaParameters)
-	}
-
 	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
-		policyParams,
+		policy.DefaultCFAParameters(),
 		model.DefaultCostConfig(),
 		model.DefaultFeasibilityConfig(),
 		nil,
@@ -559,7 +563,7 @@ func (h *Handler) HandleReplayDecision(w http.ResponseWriter, r *http.Request) {
 	)
 
 	h.writeJSON(w, http.StatusOK, ReplayResponseDTO{
-		DecisionID:                decisionID,
+		DecisionID:                report.DecisionID,
 		RunID:                     report.RunID,
 		Epoch:                     report.Epoch,
 		PolicyName:                report.PolicyName,
@@ -605,5 +609,170 @@ func (h *Handler) HandleVerifyRunIntegrity(w http.ResponseWriter, r *http.Reques
 		LatestRecordHash: lastHash,
 		BrokenRecordID:   brokenID,
 		Status:           status,
+	})
+}
+
+// HandleStreamTelemetry ingests a batch of live ELD GPS and HOS clock updates into the stream buffer.
+func (h *Handler) HandleStreamTelemetry(w http.ResponseWriter, r *http.Request) {
+	_, span := telemetry.StartSpan(r.Context(), "HTTP.POST.api.v1.stream.telemetry")
+	defer span.End()
+
+	var req StreamTelemetryRequestDTO
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+
+	if len(req.Pings) == 0 {
+		h.writeError(w, http.StatusBadRequest, "EMPTY_BATCH", "pings slice cannot be empty")
+		return
+	}
+
+	if err := h.streamBuffer.IngestDriverBatch(req.Pings); err != nil {
+		h.writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, StreamStatusResponseDTO{
+		Status: h.streamBuffer.Status(),
+	})
+}
+
+// HandleStreamTenders ingests a batch of new customer load tenders into the stream buffer.
+func (h *Handler) HandleStreamTenders(w http.ResponseWriter, r *http.Request) {
+	_, span := telemetry.StartSpan(r.Context(), "HTTP.POST.api.v1.stream.tenders")
+	defer span.End()
+
+	var req StreamTendersRequestDTO
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+
+	if len(req.Tenders) == 0 {
+		h.writeError(w, http.StatusBadRequest, "EMPTY_BATCH", "tenders slice cannot be empty")
+		return
+	}
+
+	if err := h.streamBuffer.IngestTenderBatch(req.Tenders); err != nil {
+		h.writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, StreamStatusResponseDTO{
+		Status: h.streamBuffer.Status(),
+	})
+}
+
+// HandleStreamCancels processes incoming freight tender cancellation requests.
+func (h *Handler) HandleStreamCancels(w http.ResponseWriter, r *http.Request) {
+	_, span := telemetry.StartSpan(r.Context(), "HTTP.POST.api.v1.stream.cancels")
+	defer span.End()
+
+	var req StreamCancelsRequestDTO
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+
+	for _, c := range req.Cancellations {
+		if err := h.streamBuffer.CancelTender(c); err != nil {
+			h.writeError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error())
+			return
+		}
+	}
+
+	h.writeJSON(w, http.StatusOK, StreamStatusResponseDTO{
+		Status: h.streamBuffer.Status(),
+	})
+}
+
+// HandleStreamStatus returns real-time metrics and queue depths of the streaming ingestion buffer.
+func (h *Handler) HandleStreamStatus(w http.ResponseWriter, r *http.Request) {
+	_, span := telemetry.StartSpan(r.Context(), "HTTP.GET.api.v1.stream.status")
+	defer span.End()
+
+	h.writeJSON(w, http.StatusOK, StreamStatusResponseDTO{
+		Status: h.streamBuffer.Status(),
+	})
+}
+
+// HandleRepositionPlan synthesizes empty tractor repositioning moves to balance regional freight capacity.
+func (h *Handler) HandleRepositionPlan(w http.ResponseWriter, r *http.Request) {
+	ctx, span := telemetry.StartSpan(r.Context(), "HTTP.POST.api.v1.reposition.plan")
+	defer span.End()
+
+	var req RepositionPlanRequestDTO
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_JSON", err.Error())
+		return
+	}
+
+	if len(req.Drivers) == 0 {
+		h.writeError(w, http.StatusBadRequest, "EMPTY_DRIVERS", "drivers slice cannot be empty")
+		return
+	}
+
+	// Reconstruct drivers
+	drivers := make([]model.Driver, len(req.Drivers))
+	for i, dDTO := range req.Drivers {
+		availEpoch := dDTO.AvailableEpoch
+		if availEpoch <= 0 {
+			availEpoch = time.Now().UTC().Unix()
+		}
+		driveRem := dDTO.DriveHoursRemaining
+		if driveRem <= 0 {
+			driveRem = 11.0
+		}
+		dutyRem := dDTO.DutyHoursRemaining
+		if dutyRem <= 0 {
+			dutyRem = 14.0
+		}
+		drivers[i] = model.Driver{
+			ID:                  dDTO.ID,
+			CurrentLocation:     model.Location{NodeID: dDTO.CurrentLocation.NodeID, Lat: dDTO.CurrentLocation.Lat, Lon: dDTO.CurrentLocation.Lon},
+			HomeLocation:        model.Location{NodeID: dDTO.HomeLocation.NodeID, Lat: dDTO.HomeLocation.Lat, Lon: dDTO.HomeLocation.Lon},
+			AvailableEpoch:      availEpoch,
+			DriveHoursRemaining: driveRem,
+			DutyHoursRemaining:  dutyRem,
+			Equipment:           model.Equipment{Type: parseEquipmentType(dDTO.Equipment.Type)},
+			Clocks:              hos.NewDriverClocks(hos.USPolicySpecs(), time.Unix(availEpoch, 0)),
+		}
+	}
+
+	// Reconstruct loads
+	loads := make([]model.Load, len(req.Loads))
+	for i, lDTO := range req.Loads {
+		loads[i] = model.Load{
+			ID:                    lDTO.ID,
+			Origin:                model.Location{NodeID: lDTO.Origin.NodeID, Lat: lDTO.Origin.Lat, Lon: lDTO.Origin.Lon},
+			Destination:           model.Location{NodeID: lDTO.Destination.NodeID, Lat: lDTO.Destination.Lat, Lon: lDTO.Destination.Lon},
+			PickupEarliestEpoch:   lDTO.PickupEarliestEpoch,
+			PickupLatestEpoch:     lDTO.PickupLatestEpoch,
+			DeliveryEarliestEpoch: lDTO.DeliveryEarliestEpoch,
+			DeliveryLatestEpoch:   lDTO.DeliveryLatestEpoch,
+			Revenue:               lDTO.Revenue,
+			RequiredEquipment:     parseEquipmentType(lDTO.RequiredEquipment),
+		}
+	}
+
+	resource := model.NewResourceState(drivers, loads)
+	regionMgr := model.NewRegionManager(1.0, nil)
+
+	cfg := reposition.DefaultRepositioningConfig()
+	if req.Config != nil {
+		cfg = *req.Config
+	}
+
+	moves, err := h.repositionSynth.SynthesizeRepositioningMoves(ctx, resource, regionMgr, drivers, cfg)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "REPOSITION_SYNTHESIS_FAILED", err.Error())
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, RepositionPlanResponseDTO{
+		Moves:      moves,
+		TotalMoves: len(moves),
+		Summary:    reposition.SummaryString(moves),
 	})
 }

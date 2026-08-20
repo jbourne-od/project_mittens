@@ -1,5 +1,10 @@
 package api
 
+import (
+	"github.com/optimaldynamics/project-mittens/internal/adapter/stream"
+	"github.com/optimaldynamics/project-mittens/internal/domain/policy/reposition"
+)
+
 // LocationDTO represents geographic coordinates for API payloads.
 type LocationDTO struct {
 	NodeID string  `json:"node_id"`
@@ -172,4 +177,38 @@ type ChainIntegrityResponseDTO struct {
 	LatestRecordHash string `json:"latest_record_hash,omitempty"`
 	BrokenRecordID   string `json:"broken_record_id,omitempty"`
 	Status           string `json:"status"`
+}
+
+// StreamTelemetryRequestDTO encapsulates a batch of incoming ELD driver telemetry pings.
+type StreamTelemetryRequestDTO struct {
+	Pings []stream.ELDDriverPingDTO `json:"pings"`
+}
+
+// StreamTendersRequestDTO encapsulates a batch of incoming TMS load tenders.
+type StreamTendersRequestDTO struct {
+	Tenders []stream.TMSLoadTenderDTO `json:"tenders"`
+}
+
+// StreamCancelsRequestDTO encapsulates a batch of incoming freight tender cancellations.
+type StreamCancelsRequestDTO struct {
+	Cancellations []stream.TenderCancelDTO `json:"cancellations"`
+}
+
+// StreamStatusResponseDTO wraps the current state and queue depths of the streaming ingestion buffer.
+type StreamStatusResponseDTO struct {
+	Status stream.StreamStatusDTO `json:"status"`
+}
+
+// RepositionPlanRequestDTO encapsulates driver capacity and load positions for network rebalancing.
+type RepositionPlanRequestDTO struct {
+	Drivers []DriverDTO                     `json:"drivers"`
+	Loads   []LoadDTO                       `json:"loads"`
+	Config  *reposition.RepositioningConfig `json:"config,omitempty"`
+}
+
+// RepositionPlanResponseDTO contains the generated empty tractor repositioning moves and summary.
+type RepositionPlanResponseDTO struct {
+	Moves      []reposition.RepositioningMove `json:"moves"`
+	TotalMoves int                            `json:"total_moves"`
+	Summary    string                         `json:"summary"`
 }

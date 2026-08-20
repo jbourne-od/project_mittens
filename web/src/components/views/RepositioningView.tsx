@@ -10,31 +10,41 @@ export const RepositioningView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   const defaultRegionalBalances = [
-    { region: 'Midwest (CHI, DET, IND)', surplus: 8, deficit: 0, shadowPrice: -1.25, status: 'SURPLUS' },
-    { region: 'Southeast (ATL, CLT, BNA)', surplus: 0, deficit: 6, shadowPrice: +2.40, status: 'DEFICIT' },
-    { region: 'Northeast (NYC, BOS, PHL)', surplus: 0, deficit: 4, shadowPrice: +1.85, status: 'DEFICIT' },
-    { region: 'South Central (DAL, MEM, STL)', surplus: 3, deficit: 0, shadowPrice: -0.80, status: 'SURPLUS' },
-    { region: 'West Coast (LAX, SEA, PHX)', surplus: 2, deficit: 2, shadowPrice: 0.00, status: 'BALANCED' },
+    { region: 'Midwest Surplus (CHI, DET, MKE)', surplus: 6, deficit: 0, shadowPrice: -1.25, status: 'SURPLUS' },
+    { region: 'Ohio Valley Deficit (IND, CMH, CVG)', surplus: 0, deficit: 3, shadowPrice: +2.85, status: 'DEFICIT' },
+    { region: 'South Central Deficit (STL, MEM)', surplus: 0, deficit: 2, shadowPrice: +2.15, status: 'DEFICIT' },
+    { region: 'Southeast High-Yield (ATL, CLT)', surplus: 0, deficit: 4, shadowPrice: +2.40, status: 'DEFICIT' },
+    { region: 'Southwest Balanced (DAL, HOU)', surplus: 1, deficit: 1, shadowPrice: 0.00, status: 'BALANCED' },
   ];
 
   const fetchRepositionPlan = async () => {
     setComputing(true);
     setError(null);
     try {
-      // Build standard sample network
+      // Build network with surplus capacity in Upper Midwest and high-yield tenders in surrounding nodes
       const baseEpoch = Math.floor(Date.now() / 1000);
       const res = await apiClient.repositionPlan({
         drivers: [
-          { id: 'DRV-MW-01', current_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, home_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
-          { id: 'DRV-MW-02', current_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, home_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
-          { id: 'DRV-MW-03', current_location: { node_id: 'DET', lat: 42.3314, lon: -83.0458 }, home_location: { node_id: 'DET', lat: 42.3314, lon: -83.0458 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
-          { id: 'DRV-MW-04', current_location: { node_id: 'IND', lat: 39.7684, lon: -86.1581 }, home_location: { node_id: 'IND', lat: 39.7684, lon: -86.1581 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
-          { id: 'DRV-SC-01', current_location: { node_id: 'DAL', lat: 32.7767, lon: -96.7970 }, home_location: { node_id: 'DAL', lat: 32.7767, lon: -96.7970 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
+          { id: 'DRV-CHI-01', current_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, home_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
+          { id: 'DRV-CHI-02', current_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, home_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
+          { id: 'DRV-CHI-03', current_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, home_location: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
+          { id: 'DRV-DET-01', current_location: { node_id: 'DET', lat: 42.3314, lon: -83.0458 }, home_location: { node_id: 'DET', lat: 42.3314, lon: -83.0458 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
+          { id: 'DRV-DET-02', current_location: { node_id: 'DET', lat: 42.3314, lon: -83.0458 }, home_location: { node_id: 'DET', lat: 42.3314, lon: -83.0458 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
+          { id: 'DRV-MKE-01', current_location: { node_id: 'MKE', lat: 43.0389, lon: -87.9065 }, home_location: { node_id: 'MKE', lat: 43.0389, lon: -87.9065 }, available_epoch: baseEpoch, drive_hours_remaining: 11.0, duty_hours_remaining: 14.0 },
         ],
         loads: [
-          { id: 'LOAD-ATL-CHI', origin: { node_id: 'ATL', lat: 33.7490, lon: -84.3880 }, destination: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, pickup_earliest_epoch: baseEpoch + 36000, pickup_latest_epoch: baseEpoch + 72000, delivery_earliest_epoch: baseEpoch + 72000, delivery_latest_epoch: baseEpoch + 108000, revenue: 2800.0, required_equipment: 'DRY_VAN' },
-          { id: 'LOAD-CLT-NYC', origin: { node_id: 'CLT', lat: 35.2271, lon: -80.8431 }, destination: { node_id: 'NYC', lat: 40.7128, lon: -74.0060 }, pickup_earliest_epoch: baseEpoch + 36000, pickup_latest_epoch: baseEpoch + 72000, delivery_earliest_epoch: baseEpoch + 72000, delivery_latest_epoch: baseEpoch + 108000, revenue: 2600.0, required_equipment: 'DRY_VAN' },
+          { id: 'LOAD-IND-01', origin: { node_id: 'IND', lat: 39.7684, lon: -86.1581 }, destination: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, pickup_earliest_epoch: baseEpoch + 36000, pickup_latest_epoch: baseEpoch + 72000, delivery_earliest_epoch: baseEpoch + 72000, delivery_latest_epoch: baseEpoch + 108000, revenue: 2900.0, required_equipment: 'DRY_VAN' },
+          { id: 'LOAD-IND-02', origin: { node_id: 'IND', lat: 39.7684, lon: -86.1581 }, destination: { node_id: 'DET', lat: 42.3314, lon: -83.0458 }, pickup_earliest_epoch: baseEpoch + 36000, pickup_latest_epoch: baseEpoch + 72000, delivery_earliest_epoch: baseEpoch + 72000, delivery_latest_epoch: baseEpoch + 108000, revenue: 2750.0, required_equipment: 'DRY_VAN' },
+          { id: 'LOAD-CMH-01', origin: { node_id: 'CMH', lat: 39.9612, lon: -82.9988 }, destination: { node_id: 'MKE', lat: 43.0389, lon: -87.9065 }, pickup_earliest_epoch: baseEpoch + 36000, pickup_latest_epoch: baseEpoch + 72000, delivery_earliest_epoch: baseEpoch + 72000, delivery_latest_epoch: baseEpoch + 108000, revenue: 3100.0, required_equipment: 'DRY_VAN' },
+          { id: 'LOAD-STL-01', origin: { node_id: 'STL', lat: 38.6270, lon: -90.1994 }, destination: { node_id: 'CHI', lat: 41.8781, lon: -87.6298 }, pickup_earliest_epoch: baseEpoch + 36000, pickup_latest_epoch: baseEpoch + 72000, delivery_earliest_epoch: baseEpoch + 72000, delivery_latest_epoch: baseEpoch + 108000, revenue: 2850.0, required_equipment: 'DRY_VAN' },
         ],
+        config: {
+          max_reposition_distance_miles: 500.0,
+          empty_mile_cost_rate: 1.50,
+          min_arbitrage_threshold: 100.0,
+          deficit_hurdle: 1,
+          average_transit_speed_mph: 50.0,
+        },
       });
       setMoves(res.moves || []);
       setSummary(res.summary || '');
@@ -165,29 +175,32 @@ export const RepositioningView: React.FC = () => {
               </div>
             )}
 
-            {moves.map((m) => (
-              <div
-                key={`${m.driver_id}-${m.destination_node}`}
-                className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-slate-700 transition"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold text-cyan-300">{m.driver_id}</span>
-                    <span className="text-slate-500 font-sans">→</span>
-                    <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
-                      {m.origin_node} ({m.origin_region}) → {m.destination_node} ({m.destination_region})
+            {moves.map((m) => {
+              const transitHours = m.deadhead_miles > 0 ? m.deadhead_miles / 50.0 : 0.0;
+              return (
+                <div
+                  key={`${m.driver_id}-${m.target_location?.node_id || m.target_region_id}`}
+                  className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 hover:border-slate-700 transition"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-bold text-cyan-300">{m.driver_id}</span>
+                      <span className="text-slate-500 font-sans">→</span>
+                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
+                        {m.origin_location?.node_id || 'ORIG'} → {m.target_location?.node_id || m.target_region_id}
+                      </span>
+                    </div>
+                    <span className="text-emerald-400 font-extrabold">+${m.net_repositioning_value.toFixed(2)} Lift</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-2 text-[11px] text-slate-400">
+                    <span>Deadhead: {m.deadhead_miles.toFixed(0)} mi (${m.estimated_cost.toFixed(2)})</span>
+                    <span className="text-cyan-300 font-semibold">
+                      Transit: ~{transitHours.toFixed(1)}h | Yield: ${m.expected_arbitrage_yield.toFixed(0)}
                     </span>
                   </div>
-                  <span className="text-emerald-400 font-extrabold">+${m.expected_regional_lift.toFixed(2)} Lift</span>
                 </div>
-                <div className="flex items-center justify-between mt-2 text-[11px] text-slate-400">
-                  <span>Deadhead: {m.empty_miles.toFixed(0)} mi (${m.estimated_cost.toFixed(2)})</span>
-                  <span className="text-cyan-300 font-semibold">
-                    Transit: {m.transit_hours.toFixed(1)}h
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

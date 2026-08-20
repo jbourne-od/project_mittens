@@ -128,6 +128,7 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 	bBytes, _, _ := pkgjournal.EncodeCanonicalBelief(state.Belief())
 	aBytes, aHash, _ := pkgjournal.EncodeCanonicalAction(action)
 
+	runID := fmt.Sprintf("RUN-%s", pol.Name())
 	decisionID := GenerateDecisionID(pol.Name(), currentEpoch, s.journal.Count()+1)
 	prov.OptimizationRunID = decisionID
 
@@ -186,7 +187,6 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 
 	// 8. Seal Cryptographic Journal Record & Merkle Chain Link
 	nextStateHash, _ := pkgjournal.HashState(nextState)
-	runID := fmt.Sprintf("RUN-%s", pol.Name())
 	prevHash := pkgjournal.GenesisPrevHash
 	if lastRec, ok := s.cryptoStore.LastRecord(runID); ok {
 		prevHash = lastRec.RecordHash

@@ -219,6 +219,12 @@ func (s *PostgresJournalStore) VerifyRunChain(runID string) (bool, string, error
 		return false, "", err
 	}
 	if len(records) == 0 {
+		// Fallback: If runID is actually a decisionID, lookup the record to find its parent RunID
+		if rec, getErr := s.Get(runID); getErr == nil && rec.RunID != "" {
+			records, _ = s.ListByRun(rec.RunID)
+		}
+	}
+	if len(records) == 0 {
 		return true, "empty_run", nil
 	}
 

@@ -173,10 +173,10 @@ func TestAPI_OptimizeEndpoint_ValidationErrors(t *testing.T) {
 		t.Errorf("expected 400 Bad Request on unknown policy, got %d", rr3.Code)
 	}
 
-	// 4. Unsupported competitor scale (>0)
+	// 4. Invalid competitor scale (<0)
 	compReq := api.OptimizeRequest{
 		Epoch:           1000,
-		CompetitorScale: 3,
+		CompetitorScale: -1,
 		Drivers: []api.DriverDTO{
 			{ID: "D1", CurrentLocation: api.LocationDTO{NodeID: "A"}, HomeLocation: api.LocationDTO{NodeID: "A"}},
 		},
@@ -188,7 +188,57 @@ func TestAPI_OptimizeEndpoint_ValidationErrors(t *testing.T) {
 	srv.Router().ServeHTTP(rr4, req4)
 
 	if rr4.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 Bad Request on competitor_scale > 0, got %d", rr4.Code)
+		t.Errorf("expected 400 Bad Request on competitor_scale < 0, got %d", rr4.Code)
+	}
+}
+
+func TestAPI_OptimizeEndpoint_CompetitorScaleAndPolicies(t *testing.T) {
+	srv := api.NewServer(api.DefaultServerConfig())
+	now := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC).Unix()
+
+	policies := []string{"CFA", "PiecewiseVFA", "DLA"}
+	for _, pol := range policies {
+		t.Run(pol+"_N1", func(t *testing.T) {
+			reqPayload := api.OptimizeRequest{
+				Epoch:           now,
+				PolicyClass:     pol,
+				CompetitorScale: 1,
+				Drivers: []api.DriverDTO{
+					{
+						ID:                  "DRV_01",
+						CurrentLocation:     api.LocationDTO{NodeID: "A", Lat: 40.0, Lon: -75.0},
+						HomeLocation:        api.LocationDTO{NodeID: "A", Lat: 40.0, Lon: -75.0},
+						AvailableEpoch:      now,
+						DriveHoursRemaining: 11.0,
+						DutyHoursRemaining:  14.0,
+						Equipment:           api.EquipmentDTO{Type: "DRY_VAN"},
+					},
+				},
+				Loads: []api.LoadDTO{
+					{
+						ID:                    "LOAD_01",
+						Origin:                api.LocationDTO{NodeID: "A", Lat: 40.0, Lon: -75.0},
+						Destination:           api.LocationDTO{NodeID: "B", Lat: 41.0, Lon: -74.0},
+						PickupEarliestEpoch:   now,
+						PickupLatestEpoch:     now + 3600,
+						DeliveryEarliestEpoch: now + 7200,
+						DeliveryLatestEpoch:   now + 14400,
+						Revenue:               1500.0,
+						RequiredEquipment:     "DRY_VAN",
+					},
+				},
+			}
+
+			body, _ := json.Marshal(reqPayload)
+			req, _ := http.NewRequest(http.MethodPost, "/api/v1/optimize", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			srv.Router().ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK for policy %s N=1, got %d: %s", pol, rr.Code, rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -581,5 +631,74 @@ func TestAPI_RepositionPlanEndpoint(t *testing.T) {
 	var planDTO api.RepositionPlanResponseDTO
 	if err := json.NewDecoder(rr.Body).Decode(&planDTO); err != nil {
 		t.Fatalf("failed decoding reposition plan response: %v", err)
+	}
+}
+
+func TestAPI_ScenarioCatalogEndpoints(t *testing.T) {
+	srv := api.NewServer(api.DefaultServerConfig())
+
+	// 1. Test GET /api/v1/scenarios
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/scenarios", nil)
+	rr := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/scenarios, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var listResp struct {
+		Scenarios []api.ScenarioSummaryDTO `json:"scenarios"`
+		Count     int                      `json:"count"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&listResp); err != nil {
+		t.Fatalf("failed decoding scenarios response: %v", err)
+	}
+	if listResp.Count < 5 || len(listResp.Scenarios) < 5 {
+		t.Fatalf("expected at least 5 scenarios, got %d", listResp.Count)
+	}
+
+	// 2. Test GET /api/v1/scenarios/07_test_dispatch
+	req2, _ := http.NewRequest(http.MethodGet, "/api/v1/scenarios/07_test_dispatch", nil)
+	rr2 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/scenarios/07_test_dispatch, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+
+	var detail api.ScenarioDetailDTO
+	if err := json.NewDecoder(rr2.Body).Decode(&detail); err != nil {
+		t.Fatalf("failed decoding scenario detail response: %v", err)
+	}
+	if detail.Summary.ID != "07_test_dispatch" {
+		t.Errorf("expected scenario ID 07_test_dispatch, got %s", detail.Summary.ID)
+	}
+	if len(detail.Drivers) != 3 || len(detail.Loads) != 2 {
+		t.Errorf("expected 3 drivers and 2 loads, got %d drivers and %d loads", len(detail.Drivers), len(detail.Loads))
+	}
+
+	// 3. Test GET non-existent scenario -> 404
+	req404, _ := http.NewRequest(http.MethodGet, "/api/v1/scenarios/unknown_scenario_xyz", nil)
+	rr404 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr404, req404)
+
+	if rr404.Code != http.StatusNotFound {
+		t.Errorf("expected 404 Not Found for unknown scenario, got %d", rr404.Code)
+	}
+}
+
+func TestAPI_StaticWebServing(t *testing.T) {
+	srv := api.NewServer(api.DefaultServerConfig())
+
+	// Test GET / (should serve index.html from web/dist if present)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, req)
+
+	// Since web/dist was built, it should return 200 OK with HTML
+	if rr.Code == http.StatusOK {
+		if !strings.Contains(rr.Body.String(), "Project Mittens") {
+			t.Errorf("expected HTML to contain 'Project Mittens', got: %s", rr.Body.String())
+		}
 	}
 }

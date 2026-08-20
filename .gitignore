@@ -25,3 +25,7 @@ mem.pprof
 scratch/
 .venv/
 .cache/
+node_modules/
+web/dist/
+web/node_modules/
+

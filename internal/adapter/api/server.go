@@ -74,6 +74,15 @@ func NewServer(cfg ServerConfig) *Server {
 		r.Get("/decisions/{id}/explain", h.HandleExplainDecision)
 		r.Post("/decisions/{id}/replay", h.HandleReplayDecision)
 		r.Get("/runs/{id}/integrity", h.HandleVerifyRunIntegrity)
+
+		// Streaming Ingestion
+		r.Post("/stream/telemetry", h.HandleStreamTelemetry)
+		r.Post("/stream/tenders", h.HandleStreamTenders)
+		r.Post("/stream/cancels", h.HandleStreamCancels)
+		r.Get("/stream/status", h.HandleStreamStatus)
+
+		// Fleet Repositioning
+		r.Post("/reposition/plan", h.HandleRepositionPlan)
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)

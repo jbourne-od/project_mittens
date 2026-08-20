@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/optimaldynamics/project-mittens/internal/adapter/api"
+	"github.com/optimaldynamics/project-mittens/internal/adapter/stream"
 )
 
 func TestAPI_HealthAndMetrics(t *testing.T) {
@@ -429,5 +430,156 @@ func TestAPI_SemanticJournalAndExplainability(t *testing.T) {
 
 	if notFoundRR.Code != http.StatusNotFound {
 		t.Errorf("expected 404 NOT FOUND, got %d", notFoundRR.Code)
+	}
+}
+
+func TestAPI_StreamingIngestionEndpoints(t *testing.T) {
+	srv := api.NewServer(api.DefaultServerConfig())
+	nowEpoch := time.Now().UTC().Unix()
+
+	// 1. Ingest Telemetry Pings
+	telemetryReq := api.StreamTelemetryRequestDTO{
+		Pings: []stream.ELDDriverPingDTO{
+			{
+				DriverID:            "STREAM-DRV-01",
+				Timestamp:           nowEpoch,
+				Lat:                 41.8781,
+				Lon:                 -87.6298,
+				DriveHoursRemaining: 9.5,
+				DutyHoursRemaining:  12.0,
+			},
+		},
+	}
+	bodyTele, _ := json.Marshal(telemetryReq)
+	reqTele, _ := http.NewRequest(http.MethodPost, "/api/v1/stream/telemetry", bytes.NewReader(bodyTele))
+	rrTele := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rrTele, reqTele)
+
+	if rrTele.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/stream/telemetry, got %d: %s", rrTele.Code, rrTele.Body.String())
+	}
+
+	// 2. Ingest Load Tenders
+	tendersReq := api.StreamTendersRequestDTO{
+		Tenders: []stream.TMSLoadTenderDTO{
+			{
+				LoadID:                "STREAM-TENDER-01",
+				Timestamp:             nowEpoch,
+				OriginNodeID:          "CHI",
+				OriginLat:             41.8781,
+				OriginLon:             -87.6298,
+				DestinationNodeID:     "ATL",
+				DestLat:               33.7490,
+				DestLon:               -84.3880,
+				PickupEarliestEpoch:   nowEpoch + 3600,
+				PickupLatestEpoch:     nowEpoch + 7200,
+				DeliveryEarliestEpoch: nowEpoch + 14400,
+				DeliveryLatestEpoch:   nowEpoch + 86400,
+				Revenue:               2100.0,
+				RequiredEquipment:     "DRY_VAN",
+			},
+		},
+	}
+	bodyTenders, _ := json.Marshal(tendersReq)
+	reqTenders, _ := http.NewRequest(http.MethodPost, "/api/v1/stream/tenders", bytes.NewReader(bodyTenders))
+	rrTenders := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rrTenders, reqTenders)
+
+	if rrTenders.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/stream/tenders, got %d: %s", rrTenders.Code, rrTenders.Body.String())
+	}
+
+	// 3. Check Stream Status
+	reqStatus, _ := http.NewRequest(http.MethodGet, "/api/v1/stream/status", nil)
+	rrStatus := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rrStatus, reqStatus)
+
+	if rrStatus.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/stream/status, got %d: %s", rrStatus.Code, rrStatus.Body.String())
+	}
+
+	var statusDTO api.StreamStatusResponseDTO
+	if err := json.NewDecoder(rrStatus.Body).Decode(&statusDTO); err != nil {
+		t.Fatalf("failed decoding stream status: %v", err)
+	}
+	if statusDTO.Status.BufferedDriverPings < 1 || statusDTO.Status.BufferedTendersCount < 1 {
+		t.Errorf("expected buffered pings and tenders, got pings=%d tenders=%d",
+			statusDTO.Status.BufferedDriverPings, statusDTO.Status.BufferedTendersCount)
+	}
+
+	// 4. Ingest Cancel
+	cancelsReq := api.StreamCancelsRequestDTO{
+		Cancellations: []stream.TenderCancelDTO{
+			{
+				LoadID:    "STREAM-TENDER-01",
+				Timestamp: nowEpoch + 10,
+				Reason:    "Shipper canceled order",
+			},
+		},
+	}
+	bodyCancels, _ := json.Marshal(cancelsReq)
+	reqCancels, _ := http.NewRequest(http.MethodPost, "/api/v1/stream/cancels", bytes.NewReader(bodyCancels))
+	rrCancels := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rrCancels, reqCancels)
+
+	if rrCancels.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/stream/cancels, got %d: %s", rrCancels.Code, rrCancels.Body.String())
+	}
+}
+
+func TestAPI_RepositionPlanEndpoint(t *testing.T) {
+	srv := api.NewServer(api.DefaultServerConfig())
+	nowEpoch := time.Now().UTC().Unix()
+
+	repoReq := api.RepositionPlanRequestDTO{
+		Drivers: []api.DriverDTO{
+			{
+				ID: "DRV-01",
+				CurrentLocation: api.LocationDTO{
+					NodeID: "CLT",
+					Lat:    35.2271,
+					Lon:    -80.8431,
+				},
+				AvailableEpoch:      nowEpoch,
+				DriveHoursRemaining: 11.0,
+				DutyHoursRemaining:  14.0,
+				Equipment:           api.EquipmentDTO{Type: "DRY_VAN"},
+			},
+		},
+		Loads: []api.LoadDTO{
+			{
+				ID: "LOAD-ATL-CHI",
+				Origin: api.LocationDTO{
+					NodeID: "ATL",
+					Lat:    33.7490,
+					Lon:    -84.3880,
+				},
+				Destination: api.LocationDTO{
+					NodeID: "CHI",
+					Lat:    41.8781,
+					Lon:    -87.6298,
+				},
+				PickupEarliestEpoch:   nowEpoch + 36000,
+				PickupLatestEpoch:     nowEpoch + 72000,
+				DeliveryEarliestEpoch: nowEpoch + 72000,
+				DeliveryLatestEpoch:   nowEpoch + 108000,
+				Revenue:               2800.0,
+				RequiredEquipment:     "DRY_VAN",
+			},
+		},
+	}
+
+	body, _ := json.Marshal(repoReq)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/reposition/plan", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/reposition/plan, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var planDTO api.RepositionPlanResponseDTO
+	if err := json.NewDecoder(rr.Body).Decode(&planDTO); err != nil {
+		t.Fatalf("failed decoding reposition plan response: %v", err)
 	}
 }

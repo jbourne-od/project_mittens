@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -37,6 +38,24 @@ func main() {
 	dbURL := flag.String("database-url", "", "PostgreSQL database connection URL (e.g. postgres://user:pw@host:5432/mittens)")
 	flag.Parse()
 
+	// Environment variable overrides for cloud-native deployment (AWS Fargate / App Runner / Cloud Run)
+	serverHost := *host
+	if envHost := os.Getenv("HOST"); envHost != "" && *host == "0.0.0.0" {
+		serverHost = envHost
+	}
+
+	serverPort := *port
+	if envPort := os.Getenv("PORT"); envPort != "" && *port == 8080 {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			serverPort = p
+		}
+	}
+
+	logLvlStr := *logLevel
+	if envLvl := os.Getenv("LOG_LEVEL"); envLvl != "" && *logLevel == "info" {
+		logLvlStr = envLvl
+	}
+
 	endpoint := *otlpEndpoint
 	if endpoint == "" {
 		endpoint = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -52,7 +71,7 @@ func main() {
 
 	// 1. Initialize structured logging explicitly (Inviolate 0)
 	var lvl logging.Level
-	switch *logLevel {
+	switch logLvlStr {
 	case "debug":
 		lvl = logging.LevelDebug
 	case "warn":
@@ -71,8 +90,8 @@ func main() {
 
 	slog.Info("Starting Project Mittens Optimization Server",
 		"version", "1.0.0",
-		"host", *host,
-		"port", *port,
+		"host", serverHost,
+		"port", serverPort,
 		"otlp_endpoint", endpoint,
 		"tracing_enabled", *enableTracing,
 	)
@@ -103,8 +122,8 @@ func main() {
 
 	// 3. Instantiate API Server with explicit configuration
 	srvCfg := api.ServerConfig{
-		Host:            *host,
-		Port:            *port,
+		Host:            serverHost,
+		Port:            serverPort,
 		ReadTimeoutSec:  *readTimeoutSec,
 		WriteTimeoutSec: *writeTimeoutSec,
 		IdleTimeoutSec:  *idleTimeoutSec,

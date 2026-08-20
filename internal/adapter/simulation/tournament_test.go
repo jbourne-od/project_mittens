@@ -187,3 +187,48 @@ func TestTournament_N1_Superiority_StatisticalSignificance(t *testing.T) {
 		t.Errorf("expected lower 95%% CI > 0, got $%.2f", report.TTest.ConfidenceLow95)
 	}
 }
+
+// TestTournament_TripartiteDecomposition evaluates the 3-way economic attribution decomposition:
+// V_informed - V_legacy = (V_informed - V_blind) [VoI] + (V_blind - V_legacy) [VoA]
+func TestTournament_TripartiteDecomposition(t *testing.T) {
+	cfg := simulation.DefaultTournamentConfig()
+	cfg.Episodes = 25
+	cfg.HorizonDays = 5
+	cfg.DecisionStepHours = 12
+	cfg.DriverCount = 15
+	cfg.LoadsPerEpoch = 25
+	cfg.BaseSeed = 202608205
+
+	runner := simulation.NewTournamentRunner(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	report, err := runner.RunTripartite(ctx)
+	if err != nil {
+		t.Fatalf("RunTripartite failed: %v", err)
+	}
+
+	t.Logf("\n========================================================================\n"+
+		"           TRIPARTITE ECONOMIC DECOMPOSITION (N=25 EPISODES)            \n"+
+		"========================================================================\n"+
+		"%s\n"+
+		"========================================================================\n"+
+		"  Informed vs Legacy: t=%.4f, p=%e, lift=+%.2f%%\n"+
+		"  Informed vs Blind (VoI): t=%.4f, p=%e, lift=+%.2f%%\n"+
+		"  Blind vs Legacy (VoA):   t=%.4f, p=%e, lift=+%.2f%%\n"+
+		"========================================================================",
+		report.Decomposition.SummaryString(),
+		report.TTestInformedVsLegacy.TStatistic, report.TTestInformedVsLegacy.PValueOneTailed, report.TTestInformedVsLegacy.PercentLift,
+		report.TTestInformedVsBlind.TStatistic, report.TTestInformedVsBlind.PValueOneTailed, report.TTestInformedVsBlind.PercentLift,
+		report.TTestBlindVsLegacy.TStatistic, report.TTestBlindVsLegacy.PValueOneTailed, report.TTestBlindVsLegacy.PercentLift,
+	)
+
+	// Assert that Value of Information is strictly positive
+	if report.Decomposition.ValueOfInformation <= 0 {
+		t.Errorf("expected positive Value of Information, got $%.2f", report.Decomposition.ValueOfInformation)
+	}
+	if report.TTestInformedVsBlind.PValueOneTailed >= 0.05 {
+		t.Errorf("expected VoI to be statistically significant (p < 0.05), got %e", report.TTestInformedVsBlind.PValueOneTailed)
+	}
+}
+

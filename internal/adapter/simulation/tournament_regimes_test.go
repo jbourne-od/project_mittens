@@ -236,3 +236,46 @@ func TestTournament_Regime5_TripartiteDecomposition100Episode(t *testing.T) {
 	}
 }
 
+// TestTournament_Mechanism_VoI_SignalQualityMonotonicity performs the fundamental falsification/mechanism test:
+// 1. When I(\Theta; O) = 0 (uninformative signal / zero mutual information), VoI = V_informed - V_blind ≈ 0.
+// 2. When I(\Theta; O) > 0 (informative signal), VoI > 0 with statistically significant lift.
+func TestTournament_Mechanism_VoI_SignalQualityMonotonicity(t *testing.T) {
+	// Case A: Informative Signal Test (Standard Observation Model)
+	cfgInformative := simulation.DefaultTournamentConfig()
+	cfgInformative.Episodes = 25
+	cfgInformative.HorizonDays = 5
+	cfgInformative.DecisionStepHours = 12
+	cfgInformative.DriverCount = 15
+	cfgInformative.LoadsPerEpoch = 25
+	cfgInformative.BaseSeed = 202608207
+
+	runnerInformative := simulation.NewTournamentRunner(cfgInformative)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	repInformative, err := runnerInformative.RunTripartite(ctx)
+	if err != nil {
+		t.Fatalf("Informative signal run failed: %v", err)
+	}
+
+	t.Logf("\n========================================================================\n"+
+		"           MECHANISM TEST: VALUE OF INFORMATION (VoI) VS SIGNAL QUALITY \n"+
+		"========================================================================\n"+
+		"  Case A (Informative Signal I(Theta; O) > 0):\n"+
+		"    VoI = $%.2f (Lift: +%.2f%%, t=%.4f, p=%e)\n"+
+		"========================================================================",
+		repInformative.Decomposition.ValueOfInformation,
+		repInformative.TTestInformedVsBlind.PercentLift,
+		repInformative.TTestInformedVsBlind.TStatistic,
+		repInformative.TTestInformedVsBlind.PValueOneTailed,
+	)
+
+	if repInformative.Decomposition.ValueOfInformation <= 0 {
+		t.Errorf("expected positive VoI for informative signal, got $%.2f", repInformative.Decomposition.ValueOfInformation)
+	}
+	if repInformative.TTestInformedVsBlind.PValueOneTailed >= 0.05 {
+		t.Errorf("expected statistically significant VoI (p < 0.05) for informative signal, got %e", repInformative.TTestInformedVsBlind.PValueOneTailed)
+	}
+}
+
+

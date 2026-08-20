@@ -353,6 +353,7 @@ func (p *PiecewiseVFAPolicy[C]) Evaluate(
 	}
 
 	// 2. Score candidate arcs with immediate contribution + gamma * marginal VFA slope
+	_, scoreSpan := telemetry.StartSpan(ctx, "Policy.PiecewiseVFA.ScoreCandidateArcs")
 	evals := make([]CandidateEvaluation, len(arcs))
 	for i, arc := range arcs {
 		driver, _ := res.GetDriver(arc.DriverID)
@@ -382,10 +383,11 @@ func (p *PiecewiseVFAPolicy[C]) Evaluate(
 			IsAssigned:         false,
 		}
 	}
+	scoreSpan.End()
 
 	// 3. Solve exact bipartite matching
 	epoch := drivers[0].AvailableEpoch
-	sol := p.matcher.SolveMatchingDetailed(evals, epoch, false)
+	sol := p.matcher.SolveMatchingDetailedWithContext(ctx, evals, epoch, false)
 
 	logger.InfoContext(ctx, "piecewise vfa optimization completed",
 		slog.String("policy", p.Name()),

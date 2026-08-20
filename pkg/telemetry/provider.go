@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -30,10 +33,15 @@ type TelemetryConfig struct {
 	EnableTracing  bool    `json:"enable_tracing"`
 	EnableMetrics  bool    `json:"enable_metrics"`
 	SampleRate     float64 `json:"sample_rate"`
+	OTLPEndpoint   string  `json:"otlp_endpoint"`
 }
 
 // DefaultTelemetryConfig returns standard production defaults.
 func DefaultTelemetryConfig() TelemetryConfig {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "localhost:4317"
+	}
 	return TelemetryConfig{
 		ServiceName:    "project-mittens",
 		ServiceVersion: "1.0.0",
@@ -41,6 +49,7 @@ func DefaultTelemetryConfig() TelemetryConfig {
 		EnableTracing:  true,
 		EnableMetrics:  true,
 		SampleRate:     1.0,
+		OTLPEndpoint:   endpoint,
 	}
 }
 
@@ -123,10 +132,26 @@ func NewProvider(cfg TelemetryConfig) (*Provider, error) {
 		sampler = sdktrace.TraceIDRatioBased(cfg.SampleRate)
 	}
 
-	tp := sdktrace.NewTracerProvider(
+	tpOpts := []sdktrace.TracerProviderOption{
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(sampler),
-	)
+	}
+
+	if cfg.EnableTracing && cfg.OTLPEndpoint != "" {
+		endpoint := cfg.OTLPEndpoint
+		endpoint = strings.TrimPrefix(endpoint, "http://")
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+
+		traceExp, err := otlptracegrpc.New(ctx,
+			otlptracegrpc.WithEndpoint(endpoint),
+			otlptracegrpc.WithInsecure(),
+		)
+		if err == nil {
+			tpOpts = append(tpOpts, sdktrace.WithBatcher(traceExp))
+		}
+	}
+
+	tp := sdktrace.NewTracerProvider(tpOpts...)
 	otel.SetTracerProvider(tp)
 
 	// 2. Metrics & Prometheus Setup

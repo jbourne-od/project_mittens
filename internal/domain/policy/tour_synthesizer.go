@@ -9,6 +9,8 @@ import (
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 var (
@@ -80,6 +82,9 @@ func (ts *TourSynthesizer) SynthesizeTour(
 		return nil, errors.New("domain/policy: initialLoad cannot be empty")
 	}
 
+	ctx, span := telemetry.StartSpan(ctx, "Dispatch.SynthesizeTour")
+	defer span.End()
+
 	// 1. Build Leg 1 from initialLoad
 	leg1Legs, endClocks, currentLoc, currentEpoch, err := ts.simulateSingleLoad(
 		driver.CurrentLocation,
@@ -139,6 +144,11 @@ func (ts *TourSynthesizer) SynthesizeTour(
 			}
 		}
 	}
+
+	span.SetAttributes(
+		attribute.Int("tour.legs_count", len(allLegs)),
+		attribute.Int("tour.chained_loads_count", len(usedLoads)),
+	)
 
 	// 4. Construct validated DriverTour
 	return NewDriverTour(driver.ID, allLegs, endClocks, domicileLoc)

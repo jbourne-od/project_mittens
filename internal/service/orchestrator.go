@@ -107,6 +107,7 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 
 	// 3. Record in Semantic Journal
 	decisionID := GenerateDecisionID(pol.Name(), currentEpoch, s.journal.Count()+1)
+	prov.OptimizationRunID = decisionID
 	entry := JournalEntry{
 		DecisionID:           decisionID,
 		BatchEpoch:           currentEpoch,
@@ -117,28 +118,47 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		Matches:              action.Matches(),
 		Provenance:           prov,
 	}
+	_, journalSpan := telemetry.StartSpan(ctx, "SemanticJournal.RecordDecision")
+	journalSpan.SetAttributes(
+		attribute.String("journal.decision_id", decisionID),
+		attribute.Int("journal.matched_count", action.MatchCount()),
+		attribute.Float64("journal.net_contribution", prov.TotalNetContribution),
+	)
 	if err := s.journal.Record(ctx, entry); err != nil {
 		logger.WarnContext(ctx, "failed to record journal entry", slog.String("error", err.Error()))
 	}
+	journalSpan.End()
 
 	// 4. Physical Resource Transition R_{t+1}
+	_, transSpan := telemetry.StartSpan(ctx, "State.ResourceTransition")
 	nextResource, err := state.Resource().Transition(action.Matches(), newLoads)
 	if err != nil {
+		transSpan.End()
 		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
 		logger.ErrorContext(ctx, "resource state transition failed", slog.String("error", err.Error()))
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: resource transition failed: %w", err)
 	}
+	transSpan.SetAttributes(
+		attribute.Int("transition.active_drivers", len(nextResource.Drivers())),
+		attribute.Int("transition.remaining_loads", len(nextResource.Loads())),
+	)
+	transSpan.End()
 
 	// 5. Belief State Transition b_{t+1}
 	nextBelief := state.Belief()
 	if s.beliefFilter != nil {
+		_, beliefSpan := telemetry.StartSpan(ctx, "MOMDP.BeliefTransition")
 		obs := model.NewObservation(nextEpoch, newLoads, nil)
 		filtered, err := s.beliefFilter.Filter(state.Belief(), obs, action)
 		if err != nil {
-			logger.WarnContext(ctx, "belief filter update failed, preserving prior belief", slog.String("error", err.Error()))
-		} else {
-			nextBelief = filtered
+			beliefSpan.End()
+			telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+			telemetry.RecordInvariantFailure(ctx, "BeliefFilterTransitionError")
+			logger.ErrorContext(ctx, "belief filter update failed", slog.String("error", err.Error()))
+			return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: belief filter update failed: %w", err)
 		}
+		nextBelief = filtered
+		beliefSpan.End()
 	}
 
 	// 6. Information State Transition I_{t+1}

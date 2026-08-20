@@ -15,22 +15,18 @@ import (
 
 func TestAPI_HealthAndMetrics(t *testing.T) {
 	srv := api.NewServer(api.DefaultServerConfig())
-	ts := httptest.NewServer(srv.Router())
-	defer ts.Close()
 
 	// 1. Test /healthz
-	resp, err := http.Get(ts.URL + "/healthz")
-	if err != nil {
-		t.Fatalf("GET /healthz failed: %v", err)
-	}
-	defer resp.Body.Close()
+	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
+	rr := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, req)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK from /healthz, got %d", resp.StatusCode)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /healthz, got %d", rr.Code)
 	}
 
 	var health api.HealthResponse
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+	if err := json.NewDecoder(rr.Body).Decode(&health); err != nil {
 		t.Fatalf("failed decoding health response: %v", err)
 	}
 	if health.Status != "OK" || health.Version != "1.0.0" {
@@ -38,20 +34,15 @@ func TestAPI_HealthAndMetrics(t *testing.T) {
 	}
 
 	// 2. Test /metrics
-	mResp, err := http.Get(ts.URL + "/metrics")
-	if err != nil {
-		t.Fatalf("GET /metrics failed: %v", err)
-	}
-	defer mResp.Body.Close()
+	mReq, _ := http.NewRequest(http.MethodGet, "/metrics", nil)
+	mRR := httptest.NewRecorder()
+	srv.Router().ServeHTTP(mRR, mReq)
 
-	if mResp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK from /metrics, got %d", mResp.StatusCode)
+	if mRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /metrics, got %d", mRR.Code)
 	}
 
-	buf := new(bytes.Buffer)
-	_, _ = buf.ReadFrom(mResp.Body)
-	mText := buf.String()
-
+	mText := mRR.Body.String()
 	if !strings.Contains(mText, "project-mittens") {
 		t.Errorf("expected project-mittens service_name in Prometheus metrics, got: %s", mText)
 	}
@@ -59,9 +50,6 @@ func TestAPI_HealthAndMetrics(t *testing.T) {
 
 func TestAPI_OptimizeEndpoint(t *testing.T) {
 	srv := api.NewServer(api.DefaultServerConfig())
-	ts := httptest.NewServer(srv.Router())
-	defer ts.Close()
-
 	now := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC).Unix()
 
 	reqPayload := api.OptimizeRequest{
@@ -113,18 +101,17 @@ func TestAPI_OptimizeEndpoint(t *testing.T) {
 	}
 
 	bodyBytes, _ := json.Marshal(reqPayload)
-	resp, err := http.Post(ts.URL+"/api/v1/optimize", "application/json", bytes.NewReader(bodyBytes))
-	if err != nil {
-		t.Fatalf("POST /api/v1/optimize failed: %v", err)
-	}
-	defer resp.Body.Close()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/optimize", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, req)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK from /api/v1/optimize, got %d", resp.StatusCode)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/optimize, got %d (body: %s)", rr.Code, rr.Body.String())
 	}
 
 	var optResp api.OptimizeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&optResp); err != nil {
+	if err := json.NewDecoder(rr.Body).Decode(&optResp); err != nil {
 		t.Fatalf("failed decoding optimize response: %v", err)
 	}
 
@@ -144,31 +131,27 @@ func TestAPI_OptimizeEndpoint(t *testing.T) {
 
 func TestAPI_OptimizeEndpoint_ValidationErrors(t *testing.T) {
 	srv := api.NewServer(api.DefaultServerConfig())
-	ts := httptest.NewServer(srv.Router())
-	defer ts.Close()
 
 	// 1. Empty fleet error
 	emptyReq := api.OptimizeRequest{Epoch: 1000, Drivers: []api.DriverDTO{}}
 	b1, _ := json.Marshal(emptyReq)
-	r1, err := http.Post(ts.URL+"/api/v1/optimize", "application/json", bytes.NewReader(b1))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer r1.Body.Close()
+	req1, _ := http.NewRequest(http.MethodPost, "/api/v1/optimize", bytes.NewReader(b1))
+	req1.Header.Set("Content-Type", "application/json")
+	rr1 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr1, req1)
 
-	if r1.StatusCode != http.StatusBadRequest {
-		t.Errorf("expected 400 Bad Request on empty drivers, got %d", r1.StatusCode)
+	if rr1.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request on empty drivers, got %d", rr1.Code)
 	}
 
 	// 2. Malformed JSON
-	r2, err := http.Post(ts.URL+"/api/v1/optimize", "application/json", bytes.NewReader([]byte("{invalid-json")))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer r2.Body.Close()
+	req2, _ := http.NewRequest(http.MethodPost, "/api/v1/optimize", bytes.NewReader([]byte("{invalid-json")))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr2, req2)
 
-	if r2.StatusCode != http.StatusBadRequest {
-		t.Errorf("expected 400 Bad Request on malformed JSON, got %d", r2.StatusCode)
+	if rr2.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request on malformed JSON, got %d", rr2.Code)
 	}
 
 	// 3. Unsupported policy class
@@ -180,14 +163,13 @@ func TestAPI_OptimizeEndpoint_ValidationErrors(t *testing.T) {
 		},
 	}
 	b3, _ := json.Marshal(badPolicyReq)
-	r3, err := http.Post(ts.URL+"/api/v1/optimize", "application/json", bytes.NewReader(b3))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer r3.Body.Close()
+	req3, _ := http.NewRequest(http.MethodPost, "/api/v1/optimize", bytes.NewReader(b3))
+	req3.Header.Set("Content-Type", "application/json")
+	rr3 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr3, req3)
 
-	if r3.StatusCode != http.StatusBadRequest {
-		t.Errorf("expected 400 Bad Request on unknown policy, got %d", r3.StatusCode)
+	if rr3.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request on unknown policy, got %d", rr3.Code)
 	}
 
 	// 4. Unsupported competitor scale (>0)
@@ -199,21 +181,18 @@ func TestAPI_OptimizeEndpoint_ValidationErrors(t *testing.T) {
 		},
 	}
 	b4, _ := json.Marshal(compReq)
-	r4, err := http.Post(ts.URL+"/api/v1/optimize", "application/json", bytes.NewReader(b4))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer r4.Body.Close()
+	req4, _ := http.NewRequest(http.MethodPost, "/api/v1/optimize", bytes.NewReader(b4))
+	req4.Header.Set("Content-Type", "application/json")
+	rr4 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr4, req4)
 
-	if r4.StatusCode != http.StatusBadRequest {
-		t.Errorf("expected 400 Bad Request on competitor_scale > 0, got %d", r4.StatusCode)
+	if rr4.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request on competitor_scale > 0, got %d", rr4.Code)
 	}
 }
 
 func TestAPI_SimulateEndpoint(t *testing.T) {
 	srv := api.NewServer(api.DefaultServerConfig())
-	ts := httptest.NewServer(srv.Router())
-	defer ts.Close()
 
 	startEpoch := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC).Unix()
 	locChi := api.LocationDTO{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
@@ -243,18 +222,17 @@ func TestAPI_SimulateEndpoint(t *testing.T) {
 	}
 
 	bodyBytes, _ := json.Marshal(simReq)
-	resp, err := http.Post(ts.URL+"/api/v1/simulate", "application/json", bytes.NewReader(bodyBytes))
-	if err != nil {
-		t.Fatalf("POST /api/v1/simulate failed: %v", err)
-	}
-	defer resp.Body.Close()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/simulate", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, req)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK from /api/v1/simulate, got %d", resp.StatusCode)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/v1/simulate, got %d", rr.Code)
 	}
 
 	var simResp api.SimulateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&simResp); err != nil {
+	if err := json.NewDecoder(rr.Body).Decode(&simResp); err != nil {
 		t.Fatalf("failed decoding simulate response: %v", err)
 	}
 
@@ -282,10 +260,8 @@ func TestAPI_ServerLifecycle(t *testing.T) {
 	}
 }
 
-func TestAPI_SemanticJournalRecording(t *testing.T) {
+func TestAPI_SemanticJournalAndExplainability(t *testing.T) {
 	srv := api.NewServer(api.DefaultServerConfig())
-	ts := httptest.NewServer(srv.Router())
-	defer ts.Close()
 
 	reqPayload := api.OptimizeRequest{
 		Epoch:       1700000000,
@@ -326,9 +302,9 @@ func TestAPI_SemanticJournalRecording(t *testing.T) {
 				},
 				RequiredEquipment:     "DRY_VAN_53",
 				PickupEarliestEpoch:   1700000000,
-				PickupLatestEpoch:     1700003600,
+				PickupLatestEpoch:     17000036000,
 				DeliveryEarliestEpoch: 1700010000,
-				DeliveryLatestEpoch:   1700080000,
+				DeliveryLatestEpoch:   1700000000 + 150000,
 				Revenue:               2500.0,
 			},
 		},
@@ -339,13 +315,82 @@ func TestAPI_SemanticJournalRecording(t *testing.T) {
 		t.Fatalf("failed marshaling request: %v", err)
 	}
 
-	resp, err := http.Post(ts.URL+"/api/v1/optimize", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST /api/v1/optimize failed: %v", err)
-	}
-	defer resp.Body.Close()
+	// 1. POST /api/v1/optimize
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/optimize", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rr, req)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rr.Code)
+	}
+
+	var optResp api.OptimizeResponse
+	if err := json.NewDecoder(rr.Body).Decode(&optResp); err != nil {
+		t.Fatalf("failed decoding optimize response: %v", err)
+	}
+	if optResp.DecisionID == "" {
+		t.Fatalf("expected non-empty DecisionID in optimize response")
+	}
+
+	// 2. Test GET /api/v1/decisions
+	listReq, _ := http.NewRequest(http.MethodGet, "/api/v1/decisions", nil)
+	listRR := httptest.NewRecorder()
+	srv.Router().ServeHTTP(listRR, listReq)
+
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from GET /api/v1/decisions, got %d", listRR.Code)
+	}
+
+	var summaries []api.DecisionSummaryDTO
+	if err := json.NewDecoder(listRR.Body).Decode(&summaries); err != nil {
+		t.Fatalf("failed decoding decisions list: %v", err)
+	}
+	if len(summaries) == 0 {
+		t.Fatalf("expected at least 1 decision summary, got 0")
+	}
+	if summaries[0].DecisionID != optResp.DecisionID {
+		t.Errorf("expected decision ID %s, got %s", optResp.DecisionID, summaries[0].DecisionID)
+	}
+
+	// 3. Test GET /api/v1/decisions/{id}
+	getReq, _ := http.NewRequest(http.MethodGet, "/api/v1/decisions/"+optResp.DecisionID, nil)
+	getRR := httptest.NewRecorder()
+	srv.Router().ServeHTTP(getRR, getReq)
+
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from GET /api/v1/decisions/{id}, got %d", getRR.Code)
+	}
+
+	// 4. Test GET /api/v1/decisions/{id}/explain
+	expReq, _ := http.NewRequest(http.MethodGet, "/api/v1/decisions/"+optResp.DecisionID+"/explain", nil)
+	expRR := httptest.NewRecorder()
+	srv.Router().ServeHTTP(expRR, expReq)
+
+	if expRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from GET /api/v1/decisions/{id}/explain, got %d", expRR.Code)
+	}
+
+	var explainDTO api.ExplainResponseDTO
+	if err := json.NewDecoder(expRR.Body).Decode(&explainDTO); err != nil {
+		t.Fatalf("failed decoding explain response: %v", err)
+	}
+	if explainDTO.DecisionID != optResp.DecisionID {
+		t.Errorf("expected decision ID %s in explanation, got %s", optResp.DecisionID, explainDTO.DecisionID)
+	}
+	if !strings.Contains(explainDTO.Markdown, "Optimization Decision Explanation") {
+		t.Errorf("expected markdown header in explain response, got: %s", explainDTO.Markdown)
+	}
+	if !strings.Contains(explainDTO.Markdown, "D1") || !strings.Contains(explainDTO.Markdown, "L1") {
+		t.Errorf("expected driver D1 and load L1 in explain markdown, got: %s", explainDTO.Markdown)
+	}
+
+	// 5. Test GET /api/v1/decisions/NON_EXISTENT/explain (404 NOT FOUND)
+	notFoundReq, _ := http.NewRequest(http.MethodGet, "/api/v1/decisions/NON_EXISTENT_ID/explain", nil)
+	notFoundRR := httptest.NewRecorder()
+	srv.Router().ServeHTTP(notFoundRR, notFoundReq)
+
+	if notFoundRR.Code != http.StatusNotFound {
+		t.Errorf("expected 404 NOT FOUND, got %d", notFoundRR.Code)
 	}
 }

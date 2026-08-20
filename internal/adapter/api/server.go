@@ -69,6 +69,9 @@ func NewServer(cfg ServerConfig) *Server {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/optimize", h.HandleOptimize)
 		r.Post("/simulate", h.HandleSimulate)
+		r.Get("/decisions", h.HandleListDecisions)
+		r.Get("/decisions/{id}", h.HandleGetDecision)
+		r.Get("/decisions/{id}/explain", h.HandleExplainDecision)
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)

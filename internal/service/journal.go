@@ -28,6 +28,7 @@ type JournalEntry struct {
 type Journal interface {
 	Record(ctx context.Context, entry JournalEntry) error
 	GetEntries() []JournalEntry
+	GetEntry(decisionID string) (JournalEntry, bool)
 	Count() int
 }
 
@@ -69,6 +70,20 @@ func (j *MemoryJournal) GetEntries() []JournalEntry {
 	out := make([]JournalEntry, len(oldSlice))
 	copy(out, oldSlice)
 	return out
+}
+
+// GetEntry retrieves a specific JournalEntry by its decisionID.
+func (j *MemoryJournal) GetEntry(decisionID string) (JournalEntry, bool) {
+	ptr := j.entries.Load()
+	if ptr == nil {
+		return JournalEntry{}, false
+	}
+	for _, entry := range *ptr {
+		if entry.DecisionID == decisionID || entry.Provenance.OptimizationRunID == decisionID {
+			return entry, true
+		}
+	}
+	return JournalEntry{}, false
 }
 
 // Count returns the total number of recorded journal entries.

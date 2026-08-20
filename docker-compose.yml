@@ -1,0 +1,80 @@
+# ==============================================================================
+# PROJECT MITTENS: Production Docker Compose Stack
+# ==============================================================================
+# Includes:
+#   1. mittens-api:    MOMDP Optimization Engine & OpenAPI 3.1 REST Server (Port 8080)
+#   2. tempo:          Grafana Tempo Distributed Tracing Backend (Port 3200 / 4317)
+#   3. prometheus:     Time-Series Metrics Server & Scraper (Port 9091)
+#   4. grafana:        Unified Executive Dashboard & Trace Explorer UI (Port 3000)
+# ==============================================================================
+
+services:
+  mittens-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mittens-api
+    ports:
+      - "8080:8080"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
+      - OTEL_SERVICE_NAME=project-mittens
+    command: ["-host", "0.0.0.0", "-port", "8080", "-log-level", "info"]
+    depends_on:
+      tempo:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - mittens-net
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: mittens-tempo
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./deploy/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "3201:3200" # Tempo Query HTTP (3201 on host)
+      - "4317:4317" # OTLP gRPC receiver
+    restart: unless-stopped
+    networks:
+      - mittens-net
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: mittens-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9091:9090" # Prometheus Metrics UI (9091 on host)
+    restart: unless-stopped
+    networks:
+      - mittens-net
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: mittens-grafana
+    ports:
+      - "3000:3000" # Grafana Web UI
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - tempo
+    restart: unless-stopped
+    networks:
+      - mittens-net
+
+networks:
+  mittens-net:
+    driver: bridge

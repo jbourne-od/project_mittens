@@ -40,3 +40,48 @@ func SimulationSpanAttributes(runID string, horizonDays, epochCount int) []attri
 		attribute.Int("simulation.epoch_count", epochCount),
 	}
 }
+
+// LAPSpanAttributes creates attributes for exact linear assignment network flow spans.
+func LAPSpanAttributes(rows, cols int, algorithm string) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.Int("lap.matrix_rows", rows),
+		attribute.Int("lap.matrix_cols", cols),
+		attribute.String("lap.algorithm", algorithm),
+		attribute.Bool("lap.dual_shadow_prices_extracted", true),
+	}
+}
+
+// DLASpanAttributes creates attributes for direct lookahead approximation spans.
+func DLASpanAttributes(horizon, rollouts, branches int) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.Int("dla.horizon_depth", horizon),
+		attribute.Int("dla.monte_carlo_rollouts", rollouts),
+		attribute.Int("dla.concurrent_branches", branches),
+	}
+}
+
+// BeliefSpanAttributes creates attributes for Bayesian belief filter updates.
+func BeliefSpanAttributes(simplexSize int, observationType string, drift float64) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.Int("belief.simplex_size", simplexSize),
+		attribute.String("belief.observation_type", observationType),
+		attribute.Float64("belief.simplex_drift", drift),
+	}
+}
+
+// TourSpanAttributes creates attributes for multi-leg tour synthesis spans.
+func TourSpanAttributes(maxLegs, synthesizedCount, domicileReturns int) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.Int("tour.max_legs", maxLegs),
+		attribute.Int("tour.synthesized_count", synthesizedCount),
+		attribute.Int("tour.domicile_returns", domicileReturns),
+	}
+}
+
+// RelaySpanAttributes creates attributes for relay facility exchange evaluation spans.
+func RelaySpanAttributes(evaluated, feasible int) []attribute.KeyValue {
+	return []attribute.KeyValue{
+		attribute.Int("relay.evaluated_pairs", evaluated),
+		attribute.Int("relay.feasible_relays", feasible),
+	}
+}

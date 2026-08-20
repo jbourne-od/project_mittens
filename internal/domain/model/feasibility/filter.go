@@ -11,6 +11,8 @@ import (
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // CandidateArc represents a physically feasible match assignment between a driver and a customer load.
@@ -75,6 +77,9 @@ func (f *ConcurrentFilter) FilterCandidates(
 		return nil, nil
 	}
 
+	ctx, span := telemetry.StartSpan(ctx, "Feasibility.ConcurrentFilter")
+	defer span.End()
+
 	workerCount := cfg.WorkerCount
 	if workerCount <= 0 {
 		workerCount = runtime.NumCPU()
@@ -82,6 +87,8 @@ func (f *ConcurrentFilter) FilterCandidates(
 	if workerCount > len(drivers) {
 		workerCount = len(drivers)
 	}
+
+	totalPairs := len(drivers) * len(loads)
 
 	jobsChan := make(chan driverJob, len(drivers))
 	resultsChan := make(chan workerResult, workerCount)
@@ -154,6 +161,11 @@ func (f *ConcurrentFilter) FilterCandidates(
 		}
 		return allArcs[i].LoadID < allArcs[j].LoadID
 	})
+
+	span.SetAttributes(telemetry.FeasibilitySpanAttributes(totalPairs, len(allArcs))...)
+	span.AddEvent("feasibility_filtering_complete", trace.WithAttributes(
+		telemetry.FeasibilitySpanAttributes(totalPairs, len(allArcs))...,
+	))
 
 	return allArcs, nil
 }

@@ -22,3 +22,6 @@ dist/
 *.prof
 cpu.pprof
 mem.pprof
+scratch/
+.venv/
+.cache/

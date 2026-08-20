@@ -72,6 +72,69 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/v1/decisions:
+    get:
+      summary: List all recorded optimization decisions from the Semantic Journal
+      description: Returns summary headers for all optimization batches recorded in the append-only journal.
+      operationId: listDecisions
+      responses:
+        '200':
+          description: List of decision summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DecisionSummaryDTO'
+
+  /api/v1/decisions/{id}:
+    get:
+      summary: Retrieve raw decision journal record
+      description: Returns the full-fidelity Semantic Journal record for a specific decision.
+      operationId: getDecision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Raw decision journal record
+        '404':
+          description: Decision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/decisions/{id}/explain:
+    get:
+      summary: Get causal explainability and counterfactual comparison report
+      description: >
+        Decomposes the optimization allocation into human-readable causal factors, economic attribution,
+        and counterfactual comparisons against rejected candidate load alternatives.
+      operationId: explainDecision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Structured explainability report and formatted Markdown modal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExplainResponseDTO'
+        '404':
+          description: Decision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /healthz:
     get:
       summary: Liveness and health check endpoint
@@ -491,3 +554,53 @@ components:
         message:
           type: string
           example: "matrix dimension mismatch"
+
+    DecisionSummaryDTO:
+      type: object
+      required:
+        - decision_id
+        - batch_epoch
+        - policy_name
+        - matched_count
+        - total_objective
+        - total_net_contribution
+      properties:
+        decision_id:
+          type: string
+          example: "DEC-CFA-1700000000-0001"
+        batch_epoch:
+          type: integer
+          format: int64
+          example: 1700000000
+        policy_name:
+          type: string
+          example: "CFA"
+        matched_count:
+          type: integer
+          example: 15
+        total_objective:
+          type: number
+          format: double
+          example: 18450.00
+        total_net_contribution:
+          type: number
+          format: double
+          example: 16200.00
+
+    ExplainResponseDTO:
+      type: object
+      required:
+        - decision_id
+        - explanation
+        - markdown
+      properties:
+        decision_id:
+          type: string
+          example: "DEC-CFA-1700000000-0001"
+        explanation:
+          type: object
+          description: Structured DecisionExplanation object
+        markdown:
+          type: string
+          description: Rendered GitHub-Flavored Markdown report
+          example: "# Optimization Decision Explanation\n\n### Operational Overview..."

@@ -480,7 +480,7 @@ func TestOptimizationService_CompetitiveBeliefUpdating(t *testing.T) {
 			PickupEarliestEpoch: startEpoch + 1800,
 			PickupLatestEpoch:   startEpoch + 7200,
 			DeliveryLatestEpoch: startEpoch + 28800,
-			Revenue:             3.00 * 150.0,
+			Revenue:             3.00 * locChi.DistanceMiles(locAtl),
 		})
 	}
 

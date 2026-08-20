@@ -168,6 +168,7 @@ func (p *CFAPolicy[C]) Evaluate(
 	)
 
 	// 2. Score all candidate arcs under parametric cost function
+	_, scoreSpan := telemetry.StartSpan(ctx, "Policy.CFA.ScoreCandidateArcs")
 	evals := make([]CandidateEvaluation, len(arcs))
 	for i, arc := range arcs {
 		driver, _ := res.GetDriver(arc.DriverID)
@@ -206,10 +207,11 @@ func (p *CFAPolicy[C]) Evaluate(
 			IsAssigned:         false,
 		}
 	}
+	scoreSpan.End()
 
 	// 3. Solve 1-to-1 matching via deterministic bipartite matcher
 	epoch := drivers[0].AvailableEpoch
-	matches, sortedEvals, totalObj, totalNetContrib := p.matcher.SolveMatching(evals, epoch, false)
+	matches, sortedEvals, totalObj, totalNetContrib := p.matcher.SolveMatchingWithContext(ctx, evals, epoch, false)
 
 	logger.InfoContext(ctx, "cfa optimization completed",
 		slog.String("policy", p.Name()),

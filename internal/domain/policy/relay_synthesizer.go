@@ -17,6 +17,8 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // RelaySynthesizer discovers and optimizes two-driver relay exchanges across long-haul freight corridors.
@@ -59,6 +61,9 @@ func (rs *RelaySynthesizer) SynthesizeRelays(
 	if len(drivers) < 2 || len(loads) == 0 || rs.facilityStore == nil || rs.facilityStore.Count() == 0 {
 		return nil, nil
 	}
+
+	ctx, span := telemetry.StartSpan(ctx, "Dispatch.SynthesizeRelays")
+	defer span.End()
 
 	if minHaulMiles <= 0 {
 		minHaulMiles = 450.0 // Minimum haul distance to warrant relay split
@@ -197,6 +202,11 @@ func (rs *RelaySynthesizer) SynthesizeRelays(
 		usedLoads[cand.loadID] = true
 		selectedExchanges = append(selectedExchanges, *cand.exchange)
 	}
+
+	span.SetAttributes(
+		attribute.Int("relay.candidate_count", len(allCandidates)),
+		attribute.Int("relay.selected_exchanges", len(selectedExchanges)),
+	)
 
 	return selectedExchanges, nil
 }

@@ -177,10 +177,15 @@ func (m *MarketObservationModel) LogLikelihood(obs *Observation, stateKey string
 		spotRate = totalPrice / float64(n)
 	} else if obs.LoadCount() > 0 {
 		totalRev := 0.0
+		totalMiles := 0.0
 		for _, l := range obs.loads {
 			totalRev += l.Revenue
+			miles := l.Origin.DistanceMiles(l.Destination)
+			totalMiles += miles
 		}
-		spotRate = totalRev / float64(obs.LoadCount())
+		if totalMiles > 0 {
+			spotRate = totalRev / totalMiles
+		}
 	}
 
 	diff := spotRate - prof.ExpectedSpotRateMean

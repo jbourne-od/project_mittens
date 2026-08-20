@@ -20,8 +20,8 @@ func getCoreAIDataDir(t *testing.T) string {
 	if dir == "" {
 		dir = "/Users/jacob/Development/od/coreai/engine/smart_tl/data/Carriers/TEMPLATE/input"
 	}
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		t.Skipf("skipping real carrier dataset test: data directory not found at %s", dir)
+	if _, err := os.ReadDir(dir); err != nil {
+		t.Skipf("skipping real carrier dataset test: data directory not accessible at %s (%v)", dir, err)
 	}
 	return dir
 }

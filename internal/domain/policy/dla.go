@@ -12,6 +12,8 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/rules"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
 	pkgmath "github.com/optimaldynamics/project-mittens/pkg/math"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // ArrivalSampler is a stochastic generator function producing future simulated customer load requests
@@ -135,10 +137,19 @@ func (p *DLAPolicy[C]) Evaluate(
 		return nil, DecisionProvenance{}, fmt.Errorf("dla: cannot evaluate nil state")
 	}
 
+	ctx, span := telemetry.StartSpan(ctx, "Policy.DLA.Evaluate")
+	defer span.End()
+
 	logger := logging.FromContext(ctx, p.logger)
 	res := state.Resource()
 	drivers := res.Drivers()
 	loads := res.Loads()
+	competitorScale := 0
+	if state.Belief() != nil {
+		competitorScale = state.Belief().Scale().CompetitorDimension()
+	}
+	span.SetAttributes(telemetry.OptimizationSpanAttributes("DLA", len(drivers), len(loads), competitorScale)...)
+	span.SetAttributes(telemetry.DLASpanAttributes(p.params.Horizon, p.params.NumRollouts, p.params.MaxConcurrentBranches)...)
 
 	if len(drivers) == 0 || len(loads) == 0 {
 		logger.DebugContext(ctx, "dla evaluation skipped: empty drivers or loads",
@@ -176,6 +187,8 @@ func (p *DLAPolicy[C]) Evaluate(
 	)
 
 	// 2. Evaluate all candidate branches concurrently using worker goroutines
+	_, branchSpan := telemetry.StartSpan(ctx, "Policy.DLA.EvaluateCandidateBranches")
+	branchSpan.SetAttributes(attribute.Int("dla.candidate_arcs", len(arcs)))
 	evals := make([]CandidateEvaluation, len(arcs))
 	type branchResult struct {
 		index int
@@ -279,13 +292,15 @@ func (p *DLAPolicy[C]) Evaluate(
 	// Harvest branch results
 	for resMsg := range resultsChan {
 		if resMsg.err != nil {
+			branchSpan.End()
 			return nil, DecisionProvenance{}, resMsg.err
 		}
 		evals[resMsg.index] = resMsg.eval
 	}
+	branchSpan.End()
 
 	// 3. Solve 1-to-1 matching via deterministic bipartite matcher
-	matches, sortedEvals, totalObj, totalNetContrib := p.matcher.SolveMatching(evals, epoch, false)
+	matches, sortedEvals, totalObj, totalNetContrib := p.matcher.SolveMatchingWithContext(ctx, evals, epoch, false)
 
 	logger.InfoContext(ctx, "dla optimization completed",
 		slog.String("policy", p.Name()),

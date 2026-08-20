@@ -25,12 +25,12 @@ func getCoreAIRoot(t *testing.T) string {
 	}
 	for _, dir := range candidates {
 		if dir != "" {
-			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			if entries, err := os.ReadDir(dir); err == nil && len(entries) > 0 {
 				return dir
 			}
 		}
 	}
-	t.Skip("coreai golden test fixtures directory not found; skipping legacy golden parity test")
+	t.Skip("coreai golden test fixtures directory not accessible or not found; skipping legacy golden parity test")
 	return ""
 }
 

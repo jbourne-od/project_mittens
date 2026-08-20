@@ -8,11 +8,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
 	"github.com/optimaldynamics/project-mittens/internal/service"
 	"github.com/optimaldynamics/project-mittens/internal/service/dispatch"
+	"github.com/optimaldynamics/project-mittens/pkg/explain"
 	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -219,8 +221,14 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 
 	durationMs := float64(time.Since(startTime).Microseconds()) / 1000.0
 
+	decisionID := prov.OptimizationRunID
+	if decisionID == "" {
+		decisionID = fmt.Sprintf("OPT_%d", req.Epoch)
+	}
+
 	h.writeJSON(w, http.StatusOK, OptimizeResponse{
-		RunID:                fmt.Sprintf("OPT_%d", req.Epoch),
+		DecisionID:           decisionID,
+		RunID:                decisionID,
 		Epoch:                req.Epoch,
 		MatchCount:           len(matches),
 		Matches:              matches,
@@ -385,5 +393,80 @@ func (h *Handler) HandleSimulate(w http.ResponseWriter, r *http.Request) {
 		CumulativeCost:            report.TotalOperatingCost,
 		CumulativeNetContribution: report.TotalNetContribution,
 		DailyKPIs:                 dailyKPIs,
+	})
+}
+
+// HandleListDecisions returns a list of recorded optimization decisions from the Semantic Journal.
+func (h *Handler) HandleListDecisions(w http.ResponseWriter, r *http.Request) {
+	entries := h.journal.GetEntries()
+	summaries := make([]DecisionSummaryDTO, len(entries))
+	for i, entry := range entries {
+		summaries[i] = DecisionSummaryDTO{
+			DecisionID:           entry.DecisionID,
+			BatchEpoch:           entry.BatchEpoch,
+			PolicyName:           entry.PolicyName,
+			MatchedCount:         entry.MatchedCount,
+			TotalObjective:       entry.TotalObjective,
+			TotalNetContribution: entry.TotalNetContribution,
+		}
+	}
+	h.writeJSON(w, http.StatusOK, summaries)
+}
+
+// HandleGetDecision retrieves the raw Semantic Journal record for a specific decision.
+func (h *Handler) HandleGetDecision(w http.ResponseWriter, r *http.Request) {
+	decisionID := chi.URLParam(r, "id")
+	if decisionID == "" {
+		h.writeError(w, http.StatusBadRequest, "MISSING_DECISION_ID", "decision ID path parameter is required")
+		return
+	}
+
+	entry, found := h.journal.GetEntry(decisionID)
+	if !found {
+		h.writeError(w, http.StatusNotFound, "DECISION_NOT_FOUND", fmt.Sprintf("no journal entry found for decision ID '%s'", decisionID))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, entry)
+}
+
+// HandleExplainDecision generates a comprehensive causal explainability report and counterfactual comparison.
+func (h *Handler) HandleExplainDecision(w http.ResponseWriter, r *http.Request) {
+	_, span := telemetry.StartSpan(r.Context(), "HTTP.GET.api.v1.decisions.explain")
+	defer span.End()
+
+	decisionID := chi.URLParam(r, "id")
+	if decisionID == "" {
+		h.writeError(w, http.StatusBadRequest, "MISSING_DECISION_ID", "decision ID path parameter is required")
+		return
+	}
+
+	entry, found := h.journal.GetEntry(decisionID)
+	if !found {
+		h.writeError(w, http.StatusNotFound, "DECISION_NOT_FOUND", fmt.Sprintf("no journal entry found for decision ID '%s'", decisionID))
+		return
+	}
+
+	explainer := explain.NewExplainer()
+	formatter := explain.NewFormatter()
+
+	explanation, err := explainer.ExplainDecision(entry.Provenance, nil, nil)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "EXPLANATION_FAILED", fmt.Sprintf("failed to generate explanation: %v", err))
+		return
+	}
+
+	md := formatter.FormatMarkdown(explanation)
+
+	span.SetAttributes(
+		attribute.String("decision.id", decisionID),
+		attribute.Int("decision.matched_drivers", explanation.MatchedDriversCount),
+		attribute.Int("decision.idle_drivers", explanation.IdleDriversCount),
+	)
+
+	h.writeJSON(w, http.StatusOK, ExplainResponseDTO{
+		DecisionID:  decisionID,
+		Explanation: explanation,
+		Markdown:    md,
 	})
 }

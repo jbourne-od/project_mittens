@@ -1,11 +1,15 @@
 package policy
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	pkgmath "github.com/optimaldynamics/project-mittens/pkg/math"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // MatchingAlgorithm defines the optimization method used for bipartite driver-load assignment.
@@ -52,23 +56,37 @@ type MatchingSolution struct {
 }
 
 // SolveMatching performs a deterministic bipartite assignment over candidate evaluations.
-//
-// In accordance with Principle 1 (Absolute Mathematical Rigor) and Principle 2 (Deterministic Reproducibility):
-//   - When algorithm is AlgorithmExactLAP, solves the exact Linear Assignment Problem (LAP) in O(M^2 N) time.
-//   - When algorithm is AlgorithmGreedy, sorts by TotalScore descending with deterministic tie-breaking.
-//   - Each driver and load is assigned at most once.
-//   - Negative-score matches (worse than holding driver idle) are rejected unless allowNegative is true.
 func (m *BipartiteMatcher) SolveMatching(
 	evals []CandidateEvaluation,
 	epoch int64,
 	allowNegative bool,
 ) ([]model.DriverLoadMatch, []CandidateEvaluation, float64, float64) {
-	sol := m.SolveMatchingDetailed(evals, epoch, allowNegative)
+	return m.SolveMatchingWithContext(context.Background(), evals, epoch, allowNegative)
+}
+
+// SolveMatchingWithContext performs deterministic assignment with OpenTelemetry context propagation.
+func (m *BipartiteMatcher) SolveMatchingWithContext(
+	ctx context.Context,
+	evals []CandidateEvaluation,
+	epoch int64,
+	allowNegative bool,
+) ([]model.DriverLoadMatch, []CandidateEvaluation, float64, float64) {
+	sol := m.SolveMatchingDetailedWithContext(ctx, evals, epoch, allowNegative)
 	return sol.Matches, sol.Evaluations, sol.TotalObjective, sol.TotalNetContribution
 }
 
 // SolveMatchingDetailed performs assignment and returns full primal matches along with dual shadow prices.
 func (m *BipartiteMatcher) SolveMatchingDetailed(
+	evals []CandidateEvaluation,
+	epoch int64,
+	allowNegative bool,
+) MatchingSolution {
+	return m.SolveMatchingDetailedWithContext(context.Background(), evals, epoch, allowNegative)
+}
+
+// SolveMatchingDetailedWithContext performs detailed assignment with OpenTelemetry context propagation.
+func (m *BipartiteMatcher) SolveMatchingDetailedWithContext(
+	ctx context.Context,
 	evals []CandidateEvaluation,
 	epoch int64,
 	allowNegative bool,
@@ -92,7 +110,7 @@ func (m *BipartiteMatcher) SolveMatchingDetailed(
 		}
 	}
 
-	return m.solveExactLAPDetailed(evals, epoch, allowNegative)
+	return m.solveExactLAPDetailedWithContext(ctx, evals, epoch, allowNegative)
 }
 
 // solveGreedy performs score-sorted greedy assignment.
@@ -151,8 +169,9 @@ func (m *BipartiteMatcher) solveGreedy(
 	return matches, sorted, totalObjective, totalNetContrib
 }
 
-// solveExactLAPDetailed builds the bipartite payout matrix and solves the exact Linear Assignment Problem.
-func (m *BipartiteMatcher) solveExactLAPDetailed(
+// solveExactLAPDetailedWithContext builds the bipartite payout matrix and solves the exact Linear Assignment Problem.
+func (m *BipartiteMatcher) solveExactLAPDetailedWithContext(
+	ctx context.Context,
 	evals []CandidateEvaluation,
 	epoch int64,
 	allowNegative bool,
@@ -210,10 +229,22 @@ func (m *BipartiteMatcher) solveExactLAPDetailed(
 	}
 
 	// 3. Solve exact Linear Assignment
+	_, lapSpan := telemetry.StartSpan(ctx, "Math.LAP.SolveLAPJV")
+	lapSpan.SetAttributes(telemetry.LAPSpanAttributes(numDrivers, numLoads, "LAPJV_SuccessiveShortestPath")...)
 	assignment, err := pkgmath.SolveLAP(matrix, true, allowNegative)
 	if err != nil {
+		lapSpan.End()
 		panic(fmt.Sprintf("domain/policy: exact LAP solver failed: %v", err))
 	}
+	lapSpan.SetAttributes(
+		attribute.Int("lap.matched_pairs", assignment.MatchCount),
+		attribute.Float64("lap.optimal_objective", assignment.TotalWeight),
+	)
+	lapSpan.AddEvent("lap_optimal_solution_found", trace.WithAttributes(
+		attribute.Int("lap.matched_pairs", assignment.MatchCount),
+		attribute.Float64("lap.optimal_objective", assignment.TotalWeight),
+	))
+	lapSpan.End()
 
 	// 4. Map solution back to CandidateEvaluation slice, Match tuples, and dual values
 	copiedEvals := make([]CandidateEvaluation, len(evals))

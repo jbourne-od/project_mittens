@@ -64,6 +64,7 @@ type MatchDTO struct {
 
 // OptimizeResponse defines the response structure for dispatch optimization.
 type OptimizeResponse struct {
+	DecisionID           string     `json:"decision_id"`
 	RunID                string     `json:"run_id"`
 	Epoch                int64      `json:"epoch"`
 	MatchCount           int        `json:"match_count"`
@@ -125,4 +126,21 @@ type HealthResponse struct {
 type ErrorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+// DecisionSummaryDTO provides a summary view of a recorded optimization decision.
+type DecisionSummaryDTO struct {
+	DecisionID           string  `json:"decision_id"`
+	BatchEpoch           int64   `json:"batch_epoch"`
+	PolicyName           string  `json:"policy_name"`
+	MatchedCount         int     `json:"matched_count"`
+	TotalObjective       float64 `json:"total_objective"`
+	TotalNetContribution float64 `json:"total_net_contribution"`
+}
+
+// ExplainResponseDTO encapsulates structured explanation data and rendered Markdown report.
+type ExplainResponseDTO struct {
+	DecisionID  string `json:"decision_id"`
+	Explanation any    `json:"explanation"` // *explain.DecisionExplanation
+	Markdown    string `json:"markdown"`
 }

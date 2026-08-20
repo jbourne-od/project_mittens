@@ -135,6 +135,9 @@ project_mittens/
 ├── cmd/
 │   └── optimizer/                # Main executable entrypoint
 ├── docs/
+│   ├── stochflow_journaling_audit_and_explainability.md # Lossless replay, audit & decision explainability
+│   ├── modular_rollout_and_validation_strategy.md # Friction reduction, proof & modular rollout blueprint
+│   ├── pomdp-math-to-code-guide.md # Mathematical MOMDP spec & Python-to-Go code map
 │   ├── high_level_design.md      # Authoritative architectural design
 │   ├── inviolates.md             # Non-negotiable repository laws
 │   ├── java_parity_migration_plan.md # 11-phase migration roadmap
@@ -148,17 +151,48 @@ project_mittens/
 │   ├── service/                  # Optimization orchestrator, simulator, dispatch runner
 │   │   └── dispatch/             # Multi-leg batch tour synthesis runner
 │   └── adapter/
-│       └── legacy/               # Real carrier scenario parser & golden parity suites
+│       ├── api/                  # OpenAPI 3.1 REST API server & Chi route handlers
+│       ├── legacy/               # Real carrier scenario parser & golden parity suites
+│       └── simulation/           # Ground-truth competitive market & tournament harness
 ├── pkg/
 │   ├── logging/                  # Zero-alloc structured slog wrapper
-│   └── math/                     # Pure math kernels: LAP, SPSA, Simplex, CKG, DenseMatrix
+│   ├── math/                     # Pure math kernels: LAP, SPSA, Simplex, CKG, Stats (t-test)
+│   └── telemetry/                # OpenTelemetry distributed tracing & Prometheus metrics
+├── deploy/
+│   ├── grafana/                  # Auto-provisioned Grafana datasources (Prometheus, Tempo) & dashboards
+│   ├── prometheus/               # Prometheus scraping configuration
+│   └── tempo/                    # Grafana Tempo distributed tracing configuration
+├── docker-compose.yml            # Complete containerized production observability stack
+├── Dockerfile                    # Hardened multi-stage non-root distroless container image
 ├── AGENTS.md                     # Contributor and subagent development guide
 └── go.mod                        # Go module dependencies
 ```
 
 ---
 
-## 6. Verification & Quality Standards
+## 6. Production Containerization & Observability Stack
+
+Project Mittens provides a turn-key containerized environment built on minimal, hardened, non-root Google Distroless images (`gcr.io/distroless/static-debian12:nonroot`).
+
+### Launching the Complete Stack
+To start the optimizer API, Grafana Tempo distributed tracing backend, Prometheus metrics server, and pre-configured Grafana dashboards:
+
+```bash
+docker compose up -d
+```
+
+### Stack Endpoints
+
+| Service | Port | Description |
+| :--- | :--- | :--- |
+| **Mittens REST API** | `http://localhost:8080` | OpenAPI 3.1 dispatch optimization (`/api/v1/optimize`), simulation (`/api/v1/simulate`), `/healthz`, and `/metrics` |
+| **Grafana UI** | `http://localhost:3000` | Unified executive dashboards & Tempo trace explorer (Anonymous Admin) |
+| **Grafana Tempo** | `http://localhost:3201` | High-scale distributed tracing backend (OTLP gRPC on `4317`) |
+| **Prometheus Server** | `http://localhost:9091` | Time-series metrics engine scraping 5-second intervals |
+
+---
+
+## 7. Verification & Quality Standards
 
 Project Mittens enforces a mandatory seven-step verification pipeline required before any code may be merged:
 

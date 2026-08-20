@@ -145,7 +145,6 @@ func NewServer(cfg ServerConfig) *Server {
 	}
 
 	if staticFS != nil {
-		fileServer := http.FileServer(http.FS(staticFS))
 		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api") || strings.HasPrefix(req.URL.Path, "/metrics") || strings.HasPrefix(req.URL.Path, "/healthz") {
 				http.NotFound(w, req)
@@ -153,13 +152,7 @@ func NewServer(cfg ServerConfig) *Server {
 			}
 
 			path := strings.TrimPrefix(req.URL.Path, "/")
-			if path == "" {
-				path = "index.html"
-			}
-
-			f, err := staticFS.Open(path)
-			if err != nil {
-				// SPA Client-side Route Fallback -> serve index.html
+			if path == "" || path == "index.html" {
 				indexF, err := staticFS.Open("index.html")
 				if err != nil {
 					http.NotFound(w, req)
@@ -167,12 +160,44 @@ func NewServer(cfg ServerConfig) *Server {
 				}
 				defer indexF.Close()
 				stat, _ := indexF.Stat()
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				http.ServeContent(w, req, "index.html", stat.ModTime(), indexF.(io.ReadSeeker))
+				return
+			}
+
+			// Attempt to open static asset
+			f, err := staticFS.Open(path)
+			if err != nil {
+				// SPA Client-side Route Fallback (e.g. /simulation, /provenance, /reposition) -> serve index.html
+				indexF, err := staticFS.Open("index.html")
+				if err != nil {
+					http.NotFound(w, req)
+					return
+				}
+				defer indexF.Close()
+				stat, _ := indexF.Stat()
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				http.ServeContent(w, req, "index.html", stat.ModTime(), indexF.(io.ReadSeeker))
 				return
 			}
 			defer f.Close()
 
-			fileServer.ServeHTTP(w, req)
+			stat, err := f.Stat()
+			if err != nil || stat.IsDir() {
+				indexF, err := staticFS.Open("index.html")
+				if err != nil {
+					http.NotFound(w, req)
+					return
+				}
+				defer indexF.Close()
+				istat, _ := indexF.Stat()
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				http.ServeContent(w, req, "index.html", istat.ModTime(), indexF.(io.ReadSeeker))
+				return
+			}
+
+			// Serve static asset with automatic MIME detection based on filename
+			http.ServeContent(w, req, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
 		})
 	}
 

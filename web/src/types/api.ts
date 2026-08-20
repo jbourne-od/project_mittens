@@ -239,17 +239,15 @@ export interface SimulateResponseDTO {
 
 export interface RepositioningMoveDTO {
   driver_id: string;
-  origin_region: string;
-  destination_region: string;
-  origin_node: string;
-  destination_node: string;
-  empty_miles: number;
-  estimated_cost: number;
-  expected_regional_lift: number;
-  net_shadow_delta: number;
-  dispatch_epoch: number;
+  origin_location: LocationDTO;
+  target_region_id: string;
+  target_location: LocationDTO;
+  start_epoch: number;
   arrival_epoch: number;
-  transit_hours: number;
+  deadhead_miles: number;
+  estimated_cost: number;
+  expected_arbitrage_yield: number;
+  net_repositioning_value: number;
 }
 
 export interface RepositionPlanRequestDTO {

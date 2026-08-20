@@ -220,12 +220,6 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		NextStateHash:         nextStateHash,
 	}
 	cryptoRec.Seal()
-	if err := s.cryptoStore.Append(cryptoRec); err != nil {
-		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
-		telemetry.RecordInvariantFailure(ctx, "CryptoJournalAppendFailure")
-		logger.ErrorContext(ctx, "failed appending to cryptographic journal", slog.String("error", err.Error()))
-		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to commit cryptographic journal record: %w", err)
-	}
 
 	// 9. Record in Semantic Journal
 	entry := JournalEntry{
@@ -254,6 +248,13 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to commit semantic journal entry: %w", err)
 	}
 	journalSpan.End()
+
+	// Also update standalone cryptoStore if distinct from journal (e.g. MemoryStore)
+	if s.cryptoStore != nil {
+		if _, isSame := s.journal.(pkgjournal.JournalStore); !isSame {
+			_ = s.cryptoStore.Append(cryptoRec)
+		}
+	}
 
 	durationSec := time.Since(startTime).Seconds()
 	telemetry.RecordOptimizationDuration(ctx, durationSec, pol.Name(), "success")

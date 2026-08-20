@@ -58,15 +58,15 @@ type EpisodeScore struct {
 
 // TripartiteDecomposition decomposes total economic lift into Value of Action Space vs Value of Information.
 type TripartiteDecomposition struct {
-	MeanLegacy             float64 `json:"mean_legacy"`
-	MeanBlind              float64 `json:"mean_blind"`
-	MeanInformed           float64 `json:"mean_informed"`
-	TotalLiftDollars       float64 `json:"total_lift_dollars"`       // V_informed - V_legacy
-	TotalLiftPercent       float64 `json:"total_lift_percent"`       // (TotalLift / MeanLegacy) * 100
-	ValueOfActionSpace     float64 `json:"value_of_action_space"`     // V_blind - V_legacy
-	ValueOfActionSpacePct  float64 `json:"value_of_action_space_pct"`  // (VoA / TotalLift) * 100
-	ValueOfInformation     float64 `json:"value_of_information"`     // V_informed - V_blind
-	ValueOfInformationPct  float64 `json:"value_of_information_pct"`  // (VoI / TotalLift) * 100
+	MeanLegacy            float64 `json:"mean_legacy"`
+	MeanBlind             float64 `json:"mean_blind"`
+	MeanInformed          float64 `json:"mean_informed"`
+	TotalLiftDollars      float64 `json:"total_lift_dollars"`        // V_informed - V_legacy
+	TotalLiftPercent      float64 `json:"total_lift_percent"`        // (TotalLift / MeanLegacy) * 100
+	ValueOfActionSpace    float64 `json:"value_of_action_space"`     // V_blind - V_legacy
+	ValueOfActionSpacePct float64 `json:"value_of_action_space_pct"` // (VoA / TotalLift) * 100
+	ValueOfInformation    float64 `json:"value_of_information"`      // V_informed - V_blind
+	ValueOfInformationPct float64 `json:"value_of_information_pct"`  // (VoI / TotalLift) * 100
 }
 
 // SummaryString formats the economic attribution decomposition.
@@ -89,16 +89,16 @@ func (d TripartiteDecomposition) SummaryString() string {
 
 // FactorialDecomposition2x2 encapsulates the full 2x2 factorial experimental evaluation.
 type FactorialDecomposition2x2 struct {
-	V00_LegacyBlind              float64 `json:"v00_legacy_blind"`              // Legacy Action Space + Blind Belief
-	V01_LegacyInformed           float64 `json:"v01_legacy_informed"`           // Legacy Action Space + Informed Belief
-	V10_CompetitiveBlind         float64 `json:"v10_competitive_blind"`         // Competitive Action Space + Blind Belief
-	V11_CompetitiveInformed      float64 `json:"v11_competitive_informed"`      // Competitive Action Space + Informed Belief
-	MainEffectActionSpace        float64 `json:"main_effect_action_space"`      // 0.5 * [(V10 - V00) + (V11 - V01)]
-	MainEffectInformation        float64 `json:"main_effect_information"`       // 0.5 * [(V01 - V00) + (V11 - V10)]
-	InteractionEffect            float64 `json:"interaction_effect"`            // V11 - V10 - V01 + V00 (Complementarity)
-	TotalLift                    float64 `json:"total_lift"`                    // V11 - V00
-	ConditionalVoIUnderComp      float64 `json:"conditional_voi_under_comp"`    // V11 - V10
-	ConditionalVoIUnderLegacy    float64 `json:"conditional_voi_under_legacy"`  // V01 - V00
+	V00_LegacyBlind           float64 `json:"v00_legacy_blind"`             // Legacy Action Space + Blind Belief
+	V01_LegacyInformed        float64 `json:"v01_legacy_informed"`          // Legacy Action Space + Informed Belief
+	V10_CompetitiveBlind      float64 `json:"v10_competitive_blind"`        // Competitive Action Space + Blind Belief
+	V11_CompetitiveInformed   float64 `json:"v11_competitive_informed"`     // Competitive Action Space + Informed Belief
+	MainEffectActionSpace     float64 `json:"main_effect_action_space"`     // 0.5 * [(V10 - V00) + (V11 - V01)]
+	MainEffectInformation     float64 `json:"main_effect_information"`      // 0.5 * [(V01 - V00) + (V11 - V10)]
+	InteractionEffect         float64 `json:"interaction_effect"`           // V11 - V10 - V01 + V00 (Complementarity)
+	TotalLift                 float64 `json:"total_lift"`                   // V11 - V00
+	ConditionalVoIUnderComp   float64 `json:"conditional_voi_under_comp"`   // V11 - V10
+	ConditionalVoIUnderLegacy float64 `json:"conditional_voi_under_legacy"` // V01 - V00
 }
 
 // SummaryString formats the 2x2 factorial analysis.
@@ -721,15 +721,15 @@ func (r *TournamentRunner) RunTripartite(ctx context.Context) (*TripartiteReport
 	}
 
 	decomp := TripartiteDecomposition{
-		MeanLegacy:             tInformedVsLegacy.MeanBaseline,
-		MeanBlind:              tInformedVsBlind.MeanBaseline,
-		MeanInformed:           tInformedVsLegacy.MeanCandidate,
-		TotalLiftDollars:       totalLift,
-		TotalLiftPercent:       tInformedVsLegacy.PercentLift,
-		ValueOfActionSpace:     voa,
-		ValueOfActionSpacePct:  voaPct,
-		ValueOfInformation:     voi,
-		ValueOfInformationPct:  voiPct,
+		MeanLegacy:            tInformedVsLegacy.MeanBaseline,
+		MeanBlind:             tInformedVsBlind.MeanBaseline,
+		MeanInformed:          tInformedVsLegacy.MeanCandidate,
+		TotalLiftDollars:      totalLift,
+		TotalLiftPercent:      tInformedVsLegacy.PercentLift,
+		ValueOfActionSpace:    voa,
+		ValueOfActionSpacePct: voaPct,
+		ValueOfInformation:    voi,
+		ValueOfInformationPct: voiPct,
 	}
 
 	return &TripartiteReport{

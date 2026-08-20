@@ -34,6 +34,7 @@ func main() {
 	otlpEndpoint := flag.String("otlp-endpoint", "", "OpenTelemetry collector or Tempo gRPC endpoint (e.g. tempo:4317)")
 	enableTracing := flag.Bool("enable-tracing", true, "Enable OpenTelemetry distributed tracing")
 	logLevel := flag.String("log-level", "info", "Structured log level: debug, info, warn, error")
+	dbURL := flag.String("database-url", "", "PostgreSQL database connection URL (e.g. postgres://user:pw@host:5432/mittens)")
 	flag.Parse()
 
 	endpoint := *otlpEndpoint
@@ -42,6 +43,11 @@ func main() {
 	}
 	if endpoint == "" {
 		endpoint = "tempo:4317"
+	}
+
+	databaseURL := *dbURL
+	if databaseURL == "" {
+		databaseURL = os.Getenv("DATABASE_URL")
 	}
 
 	// 1. Initialize structured logging explicitly (Inviolate 0)
@@ -102,6 +108,7 @@ func main() {
 		ReadTimeoutSec:  *readTimeoutSec,
 		WriteTimeoutSec: *writeTimeoutSec,
 		IdleTimeoutSec:  *idleTimeoutSec,
+		DatabaseURL:     databaseURL,
 	}
 	server := api.NewServer(srvCfg)
 

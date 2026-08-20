@@ -231,4 +231,3 @@ func TestTournament_TripartiteDecomposition(t *testing.T) {
 		t.Errorf("expected VoI to be statistically significant (p < 0.05), got %e", report.TTestInformedVsBlind.PValueOneTailed)
 	}
 }
-

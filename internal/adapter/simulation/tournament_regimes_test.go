@@ -334,6 +334,3 @@ func TestTournament_Mechanism_VoI_SignalQualityMonotonicity(t *testing.T) {
 		}
 	}
 }
-
-
-

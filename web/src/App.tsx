@@ -10,14 +10,15 @@ import { ShieldCheck, Cpu, Code2, Sparkles } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('playground');
-  const [lastDecisionId, setLastDecisionId] = useState<string>('DEC-07-PARITY-001');
-  const [lastRunId, setLastRunId] = useState<string>('RUN-GOLDEN-07');
+  const [lastDecisionId, setLastDecisionId] = useState<string>('');
+  const [lastRunId, setLastRunId] = useState<string>('');
   const [searchDecisionId, setSearchDecisionId] = useState<string>('');
   const [showSearchExplain, setShowSearchExplain] = useState<boolean>(false);
 
   const handleDecisionCreated = (decisionId: string, runId: string) => {
     setLastDecisionId(decisionId);
     setLastRunId(runId);
+    setSearchDecisionId(decisionId);
   };
 
   return (
@@ -54,21 +55,30 @@ export const App: React.FC = () => {
                   type="text"
                   value={searchDecisionId || lastDecisionId}
                   onChange={(e) => setSearchDecisionId(e.target.value)}
-                  placeholder="e.g. DEC-07-PARITY-001"
+                  placeholder="e.g. Run Go Optimizer in Playground first"
                   className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
                 />
                 <button
                   onClick={() => setShowSearchExplain(true)}
-                  className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold transition shadow-lg shadow-cyan-600/20"
+                  disabled={!(searchDecisionId || lastDecisionId)}
+                  className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold transition shadow-lg shadow-cyan-600/20 disabled:opacity-50"
                 >
                   Inspect Waterfall
                 </button>
               </div>
             </div>
 
+            {!(searchDecisionId || lastDecisionId) && (
+              <div className="p-8 rounded-3xl bg-slate-900/40 border border-slate-800/60 text-center font-mono text-xs text-slate-400">
+                <Sparkles className="w-8 h-8 text-cyan-400/60 mx-auto mb-3" />
+                <p className="font-bold text-slate-200">No Optimization Run Selected</p>
+                <p className="text-slate-500 mt-1">Run an optimization in the Golden Playground or enter a Decision ID above.</p>
+              </div>
+            )}
+
             {/* If user triggered explain drawer */}
             <ExplainabilityDrawer
-              decisionId={showSearchExplain ? (searchDecisionId || lastDecisionId) : null}
+              decisionId={showSearchExplain ? (searchDecisionId || lastDecisionId) : (lastDecisionId || null)}
               onClose={() => setShowSearchExplain(false)}
             />
           </div>

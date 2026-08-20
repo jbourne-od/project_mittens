@@ -8,6 +8,8 @@ export const RepositioningView: React.FC = () => {
   const [moves, setMoves] = useState<RepositioningMoveDTO[]>([]);
   const [summary, setSummary] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [emptyRate, setEmptyRate] = useState<number>(1.50);
 
   const defaultRegionalBalances = [
     { region: 'Midwest Surplus (CHI, DET, MKE)', surplus: 6, deficit: 0, shadowPrice: -1.25, status: 'SURPLUS' },
@@ -17,7 +19,7 @@ export const RepositioningView: React.FC = () => {
     { region: 'Southwest Balanced (DAL, HOU)', surplus: 1, deficit: 1, shadowPrice: 0.00, status: 'BALANCED' },
   ];
 
-  const fetchRepositionPlan = async () => {
+  const fetchRepositionPlan = async (rate: number = emptyRate) => {
     setComputing(true);
     setError(null);
     try {
@@ -40,7 +42,7 @@ export const RepositioningView: React.FC = () => {
         ],
         config: {
           max_reposition_distance_miles: 500.0,
-          empty_mile_cost_rate: 1.50,
+          empty_mile_cost_rate: rate,
           min_arbitrage_threshold: 100.0,
           deficit_hurdle: 1,
           average_transit_speed_mph: 50.0,
@@ -48,6 +50,7 @@ export const RepositioningView: React.FC = () => {
       });
       setMoves(res.moves || []);
       setSummary(res.summary || '');
+      setLastUpdated(new Date());
     } catch (err: any) {
       setError(err.message || 'Failed computing repositioning moves');
     } finally {
@@ -75,14 +78,39 @@ export const RepositioningView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={fetchRepositionPlan}
-          disabled={computing}
-          className="flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold transition shadow-lg shadow-cyan-600/20 disabled:opacity-50"
-        >
-          <Compass className={`w-3.5 h-3.5 ${computing ? 'animate-spin' : ''}`} />
-          <span>{computing ? 'Computing Gradients...' : 'Recompute Shadow Gradients'}</span>
-        </button>
+        <div className="flex flex-col md:flex-row items-end md:items-center gap-3">
+          <div className="flex items-center space-x-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-mono">
+            <span className="text-slate-400">Rate/Mi:</span>
+            <select
+              value={emptyRate}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setEmptyRate(val);
+                fetchRepositionPlan(val);
+              }}
+              className="bg-transparent text-cyan-300 font-bold focus:outline-none cursor-pointer"
+            >
+              <option value="1.25">$1.25 / mi</option>
+              <option value="1.50">$1.50 / mi</option>
+              <option value="1.75">$1.75 / mi</option>
+              <option value="2.00">$2.00 / mi</option>
+            </select>
+          </div>
+
+          {lastUpdated && (
+            <span className="text-[11px] font-mono text-emerald-400">
+              Synced: {lastUpdated.toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            onClick={() => fetchRepositionPlan(emptyRate)}
+            disabled={computing}
+            className="flex items-center space-x-2 px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold transition shadow-lg shadow-cyan-600/20 disabled:opacity-50"
+          >
+            <Compass className={`w-3.5 h-3.5 ${computing ? 'animate-spin' : ''}`} />
+            <span>{computing ? 'Computing Gradients...' : 'Recompute Shadow Gradients'}</span>
+          </button>
+        </div>
       </div>
 
       {error && (

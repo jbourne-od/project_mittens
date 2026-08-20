@@ -357,6 +357,7 @@ export const GoldenPlaygroundView: React.FC<GoldenPlaygroundViewProps> = ({ onDe
       {/* Decision Explainability Drawer */}
       <ExplainabilityDrawer
         decisionId={explainDecisionId}
+        selectedDriverId={selectedMatch?.driver_id}
         onClose={() => setExplainDecisionId(null)}
       />
     </div>

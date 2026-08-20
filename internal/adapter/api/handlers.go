@@ -428,9 +428,18 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 		decisionID = fmt.Sprintf("OPT_%d", req.Epoch)
 	}
 
+	policyName := prov.PolicyName
+	if policyName == "" {
+		policyName = req.PolicyClass
+	}
+	if policyName == "" {
+		policyName = "CFA"
+	}
+	runID := fmt.Sprintf("RUN-%s", policyName)
+
 	h.writeJSON(w, http.StatusOK, OptimizeResponse{
 		DecisionID:           decisionID,
-		RunID:                decisionID,
+		RunID:                runID,
 		Epoch:                req.Epoch,
 		MatchCount:           len(matches),
 		Matches:              matches,

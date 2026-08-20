@@ -209,9 +209,10 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                   x2={pO.x}
                   y2={pO.y}
                   stroke="#38bdf8"
-                  strokeWidth={isSelected ? '2.5' : '1.5'}
-                  strokeDasharray="3,3"
-                  opacity={isSelected ? 1 : 0.75}
+                  strokeWidth={isSelected ? '3' : '2'}
+                  strokeDasharray="4,4"
+                  opacity={isSelected ? 1 : 0.85}
+                  className="animate-pulse"
                 />
 
                 {/* Loaded Linehaul leg (Pickup -> Destination) */}
@@ -221,10 +222,10 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                   x2={pDest.x}
                   y2={pDest.y}
                   stroke="url(#grad-matched)"
-                  strokeWidth={isSelected ? '4' : '2.5'}
-                  filter={isSelected ? 'url(#glow)' : undefined}
+                  strokeWidth={isSelected ? '4.5' : '3'}
+                  filter="url(#glow)"
                   markerEnd="url(#arrow-matched)"
-                  opacity={isSelected ? 1 : 0.9}
+                  opacity={1}
                 />
               </g>
             );

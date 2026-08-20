@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/optimaldynamics/project-mittens/internal/adapter/db"
 	"github.com/optimaldynamics/project-mittens/internal/adapter/stream"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/model/hos"
@@ -46,17 +48,30 @@ type ServerState struct {
 	SimulateCallsTotal atomic.Uint64
 }
 
+// HandlerDependencies provides explicitly injected persistence and processing engines.
+type HandlerDependencies struct {
+	Journal         service.Journal
+	CryptoStore     pkgjournal.JournalStore
+	DBPool          *db.Pool
+	RunRepository   *db.PostgresRunRepository
+	StreamBuffer    *stream.StreamBuffer
+	StreamSync      *stream.StateSynchronizer
+	RepositionSynth *reposition.RepositioningSynthesizer
+}
+
 // Handler provides HTTP request handling methods.
 type Handler struct {
 	state           *ServerState
 	journal         service.Journal
 	cryptoStore     pkgjournal.JournalStore
+	dbPool          *db.Pool
+	runRepo         *db.PostgresRunRepository
 	streamBuffer    *stream.StreamBuffer
 	streamSync      *stream.StateSynchronizer
 	repositionSynth *reposition.RepositioningSynthesizer
 }
 
-// NewHandler initializes a new Handler with an optional Semantic Journal instance.
+// NewHandler initializes a new Handler with default in-memory engines.
 func NewHandler(journal ...service.Journal) *Handler {
 	var j service.Journal
 	if len(journal) > 0 && journal[0] != nil {
@@ -77,6 +92,43 @@ func NewHandler(journal ...service.Journal) *Handler {
 	}
 }
 
+// NewHandlerWithDeps initializes a Handler with explicitly injected dependencies.
+func NewHandlerWithDeps(deps HandlerDependencies) *Handler {
+	j := deps.Journal
+	if j == nil {
+		j = service.NewMemoryJournal()
+	}
+	cs := deps.CryptoStore
+	if cs == nil {
+		cs = pkgjournal.NewMemoryStore()
+	}
+	buf := deps.StreamBuffer
+	if buf == nil {
+		buf = stream.NewStreamBuffer()
+	}
+	sync := deps.StreamSync
+	if sync == nil {
+		sync = stream.NewStateSynchronizer(buf)
+	}
+	synth := deps.RepositionSynth
+	if synth == nil {
+		synth = reposition.NewRepositioningSynthesizer()
+	}
+
+	return &Handler{
+		state: &ServerState{
+			StartTime: time.Now().UTC(),
+		},
+		journal:         j,
+		cryptoStore:     cs,
+		dbPool:          deps.DBPool,
+		runRepo:         deps.RunRepository,
+		streamBuffer:    buf,
+		streamSync:      sync,
+		repositionSynth: synth,
+	}
+}
+
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -90,10 +142,22 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, code, msg string
 // HandleHealth serves the /healthz endpoint.
 func (h *Handler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	uptime := time.Since(h.state.StartTime).Seconds()
+	dbStatus := "in-memory"
+	if h.dbPool != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := h.dbPool.Ping(ctx); err != nil {
+			dbStatus = "unreachable"
+		} else {
+			dbStatus = "connected"
+		}
+	}
+
 	h.writeJSON(w, http.StatusOK, HealthResponse{
 		Status:        "OK",
 		Version:       "1.0.0",
 		UptimeSeconds: uptime,
+		Database:      dbStatus,
 	})
 }
 

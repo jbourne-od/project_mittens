@@ -12,6 +12,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/optimaldynamics/project-mittens/internal/adapter/db"
+	"github.com/optimaldynamics/project-mittens/internal/service"
+	pkgjournal "github.com/optimaldynamics/project-mittens/pkg/journal"
 	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
 )
 
@@ -22,6 +25,8 @@ type ServerConfig struct {
 	ReadTimeoutSec  int
 	WriteTimeoutSec int
 	IdleTimeoutSec  int
+	DatabaseURL     string
+	DBConfig        *db.DBConfig
 }
 
 // DefaultServerConfig returns production-ready server defaults.
@@ -46,7 +51,41 @@ type Server struct {
 // NewServer initializes Chi routes, middleware, and handlers.
 func NewServer(cfg ServerConfig) *Server {
 	r := chi.NewRouter()
-	h := NewHandler()
+
+	var (
+		pool    *db.Pool
+		jStore  service.Journal
+		cStore  pkgjournal.JournalStore
+		runRepo *db.PostgresRunRepository
+	)
+
+	dbConnStr := cfg.DatabaseURL
+	if dbConnStr == "" && cfg.DBConfig != nil {
+		dbConnStr = cfg.DBConfig.ConnString()
+	}
+
+	if dbConnStr != "" {
+		dbCfg, err := db.ParseURL(dbConnStr)
+		if err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			p, err := db.NewPool(ctx, dbCfg)
+			cancel()
+			if err == nil {
+				pool = p
+				pgStore := db.NewPostgresJournalStore(pool)
+				jStore = pgStore
+				cStore = pgStore
+				runRepo = db.NewPostgresRunRepository(pool)
+			}
+		}
+	}
+
+	h := NewHandlerWithDeps(HandlerDependencies{
+		Journal:       jStore,
+		CryptoStore:   cStore,
+		DBPool:        pool,
+		RunRepository: runRepo,
+	})
 
 	// Middleware Stack
 	r.Use(middleware.RequestID)
@@ -153,7 +192,10 @@ func (s *Server) Start() error {
 	return s.httpSrv.ListenAndServe()
 }
 
-// Shutdown gracefully stops the HTTP server.
+// Shutdown gracefully stops the HTTP server and closes database connection pools.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.handler != nil && s.handler.dbPool != nil {
+		s.handler.dbPool.Close()
+	}
 	return s.httpSrv.Shutdown(ctx)
 }

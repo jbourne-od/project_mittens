@@ -146,6 +146,7 @@ type HealthResponse struct {
 	Status        string  `json:"status"`
 	Version       string  `json:"version"`
 	UptimeSeconds float64 `json:"uptime_seconds"`
+	Database      string  `json:"database,omitempty"`
 }
 
 // ErrorResponse represents standard error payload format.

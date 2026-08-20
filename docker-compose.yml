@@ -3,9 +3,10 @@
 # ==============================================================================
 # Includes:
 #   1. mittens-api:    MOMDP Optimization Engine & OpenAPI 3.1 REST Server (Port 8080)
-#   2. tempo:          Grafana Tempo Distributed Tracing Backend (Port 3200 / 4317)
-#   3. prometheus:     Time-Series Metrics Server & Scraper (Port 9091)
-#   4. grafana:        Unified Executive Dashboard & Trace Explorer UI (Port 3000)
+#   2. postgres:       PostgreSQL 18.4 Alpine Database & Semantic Journal Storage (Port 5432)
+#   3. tempo:          Grafana Tempo Distributed Tracing Backend (Port 3200 / 4317)
+#   4. prometheus:     Time-Series Metrics Server & Scraper (Port 9091)
+#   5. grafana:        Unified Executive Dashboard & Trace Explorer UI (Port 3000)
 # ==============================================================================
 
 services:
@@ -19,10 +20,34 @@ services:
     environment:
       - OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
       - OTEL_SERVICE_NAME=project-mittens
+      - DATABASE_URL=postgres://mittens:mittens_secret_pw@postgres:5432/mittens?sslmode=disable
     command: ["-host", "0.0.0.0", "-port", "8080", "-log-level", "info"]
     depends_on:
       tempo:
         condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mittens-net
+
+  postgres:
+    image: postgres:18.4-alpine
+    container_name: mittens-postgres
+    environment:
+      - POSTGRES_DB=mittens
+      - POSTGRES_USER=mittens
+      - POSTGRES_PASSWORD=mittens_secret_pw
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mittens-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mittens -d mittens"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     networks:
       - mittens-net
@@ -78,3 +103,8 @@ services:
 networks:
   mittens-net:
     driver: bridge
+
+volumes:
+  mittens-pgdata:
+    driver: local
+

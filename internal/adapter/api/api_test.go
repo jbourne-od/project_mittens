@@ -33,6 +33,9 @@ func TestAPI_HealthAndMetrics(t *testing.T) {
 	if health.Status != "OK" || health.Version != "1.0.0" {
 		t.Errorf("unexpected health body: %+v", health)
 	}
+	if health.Database != "in-memory" {
+		t.Errorf("expected default database status 'in-memory', got %s", health.Database)
+	}
 
 	// 2. Test /metrics
 	mReq, _ := http.NewRequest(http.MethodGet, "/metrics", nil)

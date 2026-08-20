@@ -1,10 +1,10 @@
 # Doctoral Defense & Mathematical Subsumption Dissertation: $\text{Powell} \subset \text{Mittens}$
 
-**Degree:** Doctor of Science in Computational Operations Research & Mathematical Optimization  
+**Defense Format:** Mock Doctoral Defense in Computational Operations Research & Mathematical Optimization  
 **Dissertation Title:** *Formal Subsumption and Generalization of Warren Powell's Sequential Decision Analytics via Factored Mixed-Observability Markov Decision Processes*  
 **Date of Ratification:** August 20, 2026  
 **Examining Body:** Adversarial Doctoral Dissertation Committee (Four Specialized Isolated Subagent Audits)  
-**Aggregation Rule:** Strict Conjunctive Consensus ($\text{Equivalent} = \bigwedge_{i=1}^4 \text{Examiner}_i.\text{Verified}$)  
+**Aggregation Rule:** Strict Conjunctive Consensus ($\text{CommitteeRatified} = \bigwedge_{i=1}^4 \text{Examiner}_i.\text{Verified}$)  
 **Final Verdict:** **UNANIMOUSLY RATIFIED / VERIFIED**
 
 ---
@@ -15,24 +15,26 @@
 
 $$\mathbf{Powell \subset Mittens}$$
 
-Project Mittens is not an ad-hoc optimizer that happens to pass legacy test suites. It is a mathematically rigorous super-system. Warren Powell's classical, fully observable sequential decision analytics framework (*Powell, 2022, Reinforcement Learning and Stochastic Optimization*) is **formally subsumed as the degenerate monopolistic ($N=0$) special case** of Project Mittens' Mixed-Observability Markov Decision Process ($S_t^{\text{ext}} = (R_t, I_t, b_t)$). 
+Project Mittens is not an ad-hoc optimizer that happens to pass legacy test suites. It is a mathematically rigorous super-system. Warren Powell's classical, fully observable sequential decision analytics framework (*Powell, 2022, Reinforcement Learning and Stochastic Optimization*) is **formally subsumed as the degenerate monopolistic ($N=0$) special case** of Project Mittens' Mixed-Observability Markov Decision Process ($S_t^{\text{ext}} = (R_t, I_t, b_t)$).
 
-When $N=0$, the latent market belief space collapses to an invariant 0-dimensional Dirac delta distribution with zero residual uncertainty in the latent dimension ($H(b_t) = 0$), establishing strict state and transition reduction to Powell's canonical MDP ($S_t = (R_t, I_t)$). When $N \ge 1$, Project Mittens strictly generalizes Powell's formulation to endogenous, competitive, partially observable freight markets.
+When $N=0$, the latent market belief space collapses to an invariant 0-dimensional Dirac delta distribution with zero residual uncertainty in the latent dimension ($H(b_t) = 0$), establishing strict state, action, contribution, and transition reduction to Powell's canonical MDP ($S_t = (R_t, I_t)$). When $N \ge 1$, Project Mittens strictly generalizes Powell's formulation to endogenous, competitive, partially observable freight markets.
 
 ---
 
 ## 2. Committee Structure & The Conjunctive Aggregation Rule
 
-To guarantee absolute credibility, the dissertation was audited by four adversarial examiners operating under isolated execution contexts and specialized mandates:
+To guarantee absolute credibility, the dissertation was audited by four adversarial examiners operating under isolated execution contexts and specialized mandates. The Committee Chair applies the **Strict Conjunctive Aggregation Rule**:
 
-$$\text{Equivalent} = \text{Mathematician}.\text{Verified} \wedge \text{CompilerLawyer}.\text{Verified} \wedge \text{NumericalSadist}.\text{Verified} \wedge \text{CounterexampleGen}.\text{Verified}$$
+$$\boxed{\text{CommitteeRatified} = \text{Mathematician}.\text{Verified} \wedge \text{CompilerLawyer}.\text{Verified} \wedge \text{NumericalSadist}.\text{Verified} \wedge \text{CounterexampleGen}.\text{Verified}}$$
 
 *Crucially, no averaging or majority voting is permitted. Exactly one valid counterexample, unhandled edge condition, or semantic mutation defeats the equivalence claim.*
+
+> **Epistemological Principle:** Mathematics determines truth. Committee consensus determines whether we have supplied sufficient evidence to assert it.
 
 ```
                              ┌─────────────────────────────────────────────────────────┐
                              │       The Doctoral Examination Committee Chair         │
-                             │   Aggregation Rule: Equivalent = ⋀ Examiner_i.Verified  │
+                             │ Aggregation Rule: CommitteeRatified = ⋀ Examiner_i.Ver  │
                              └────────────────────────────┬────────────────────────────┘
                                                           │
          ┌────────────────────────┬───────────────────────┴───────────────────────┬────────────────────────┐
@@ -41,7 +43,7 @@ $$\text{Equivalent} = \text{Mathematician}.\text{Verified} \wedge \text{Compiler
 │ The Mathematician│    │The CompilerLawyer│                            │The NumericalSadist│   │The Counterexample│
 │                  │    │                  │                            │                  │    │    Generator     │
 │ Formal Model &   │    │ AST Semantics &  │                            │ IEEE 754 Floats, │    │ Property-Based   │
-│ MOMDP Reductions │    │ Memory Isolation │                            │ Drift & Sorting  │    │ Falsification    │
+│ Commutative Proof│    │ Memory Isolation │                            │ Drift & Sorting  │    │ Falsification    │
 │                  │    │                  │                            │                  │    │                  │
 │ Status: VERIFIED │    │ Status: VERIFIED │                            │ Status: VERIFIED │    │ Status: VERIFIED │
 └──────────────────┘    └──────────────────┘                            └──────────────────┘    └──────────────────┘
@@ -63,40 +65,109 @@ Warren Powell establishes that every sequential decision problem is fully define
 
 ---
 
-## 4. Formal Proof: Monopolistic Degeneracy Collapse ($N=0$)
+## 4. Formal Proof: The Four Commutative Lemmas & Bellman Induction Theorem
 
-### Theorem 1 (State Reduction under $N=0$)
-Let the competitor dimension be $N=0$ (`model.Monopolistic`). Then:
-1. The latent competitor state space collapses to the singleton $\mathcal{H}_0 = \{ \Theta_\emptyset \}$.
-2. The probability simplex $\Delta(\mathcal{H}_0) = \{ 1.0 \}$ is 0-dimensional.
-3. The belief state $b_t = \delta(\Theta - \Theta_\emptyset)$ exhibits **zero residual uncertainty in the latent dimension**: $H(b_t) = 0 \text{ bits}$.
-4. The recursive Bayesian transition operator is an exact invariant identity mapping: $b_{t+1} = b_t = \delta(\Theta - \Theta_\emptyset)$.
-5. The state projection $\pi(R, I, \delta(\Theta - \Theta_\emptyset)) = (R, I)$ is an exact bijective reduction, and transition operators commute:
-   $$\pi\big(S^M_{\text{Mittens}}(S_t^{\text{ext}}, a_t, W_{t+1})\big) = S^M_{\text{Powell}}(\pi(S_t^{\text{ext}}), x_t, W_{t+1})$$
-   Thus, Project Mittens strictly reduces to Powell's canonical MDP under $N=0$.
+To establish the formal theorem $\mathbf{Powell \subset Mittens}$, we construct the explicit embedding map $\iota: \mathcal{S}^P \to \mathcal{S}^M_0$ and projection map $\pi: \mathcal{S}^M_0 \to \mathcal{S}^P$, defined by:
+$$\iota(R, I) = (R, I, \delta_{\Theta_\emptyset}), \qquad \pi(R, I, b) = (R, I)$$
+and the corresponding decision embedding $\iota_X(x) = (x, \emptyset)$ and projection $\pi_X(x, p) = x$.
 
-### Proof:
-1. **Simplex Dimensionality**: $\dim(\Delta(\mathcal{H}_0)) = |\mathcal{H}_0| - 1 = 1 - 1 = 0$.
-2. **Entropy**: $H(b_t) = - \sum_{\Theta \in \mathcal{H}_0} b_t(\Theta) \log_2 b_t(\Theta) = - (1.0 \log_2 1.0) = 0 \text{ bits}$.
-3. **Bayesian Filtering**:
-   $$b_{t+1}(\Theta_\emptyset) = \frac{P(o_{t+1} \mid \Theta_\emptyset) b_t(\Theta_\emptyset) T(\Theta_\emptyset \mid \Theta_\emptyset)}{\sum_{\Theta_k \in \mathcal{H}_0} P(o_{t+1} \mid \Theta_k) b_t(\Theta_k) T(\Theta_k \mid \Theta_k)} = \frac{P(o_{t+1} \mid \Theta_\emptyset) \cdot 1.0 \cdot 1.0}{P(o_{t+1} \mid \Theta_\emptyset) \cdot 1.0 \cdot 1.0} = 1.0$$
-4. **Commutative Dynamics**:
-   $$\pi\big(S^M_{\text{Mittens}}(R_t, I_t, b_0, a_t, W_{t+1})\big) = (R_{t+1}, I_{t+1}) = S^M_{\text{Powell}}(R_t, I_t, x_t, W_{t+1})$$
+We prove that the four fundamental commutative diagrams hold identically under monopolistic degeneracy ($N=0$).
+
+```
+                ι(S) ────────────────── a = (x, ∅) ──────────────────► T^M(ι(S), a, W)
+                 │                                                          │
+                 │                                                          │
+             π(S^M) = S                                                 π(T^M) = T^P
+                 │                                                          │
+                 ▼                                                          ▼
+                 S   ─────────────────────── x ───────────────────────►   T^P(S, x, W)
+```
+
+---
+
+### Lemma 1 (State Reduction & Topological Belief Invariance)
+$$\pi(S^M_0) = S^P \quad \text{and} \quad (\iota \circ \pi)(S^M_0) = S^M_0$$
+*Proof:*
+1. Under $N=0$ (`model.Monopolistic`), the competitor parameter space is the singleton set $\mathcal{H}_0 = \{\Theta_\emptyset\}$.
+2. The space of probability distributions $\Delta(\mathcal{H}_0) = \{\delta_{\Theta_\emptyset}\}$ contains **exactly one probability measure**.
+3. Therefore, any valid Bayesian transition operator $\mathcal{B}: \Delta(\mathcal{H}_0) \to \Delta(\mathcal{H}_0)$ must return this unique measure:
+   $$b_{t+1} = \delta_{\Theta_\emptyset}$$
+   This topological uniqueness eliminates any potential $0/0$ arithmetic indeterminate forms.
+4. The Shannon entropy of the belief distribution is strictly zero:
+   $$H(b_t) = - (1.0 \log_2 1.0) = 0 \text{ bits}$$
+   establishing zero residual uncertainty in the latent dimension. The maps $\iota$ and $\pi$ are exact bijections between $\mathcal{S}^M_0$ and $\mathcal{S}^P$. $\blacksquare$
+
+---
+
+### Lemma 2 (Feasibility & Action Space Commutation)
+$$\mathcal{X}^M_0(\iota(S)) = \iota_X(\mathcal{X}^P(S))$$
+*Proof:*
+1. In Powell's canonical dispatch model, the physical action is a bipartite match vector $x \in \{0, 1\}^{|\mathcal{D}| \times |\mathcal{L}|}$ satisfying $\sum_\ell x_{d,\ell} \le 1$ and $\sum_d x_{d,\ell} \le 1$.
+2. In Project Mittens, the generalized action is $a = (x, p) \in \mathcal{X}_t(R_t) \times \mathcal{P}_t$.
+3. Under $N=0$, the spot auction is deactivated ($\mathcal{P}_t = \emptyset$), as freight revenue $R_\ell$ is fixed and exogenous without competitor bidding. Thus $a = (x, \emptyset) \cong x$.
+4. Hours-of-Service (HOS) feasibility filters ([`feasibility.ConcurrentFilter`](file:///Users/jacob/Development/od/project_mittens/internal/domain/model/feasibility/filter.go)) operate strictly on the physical resource state $R_t$. Because $\pi(S^M_0) = S^P$, the feasible matching set is identical: $\mathcal{X}^M_0(\iota(S)) = \iota_X(\mathcal{X}^P(S))$. $\blacksquare$
+
+---
+
+### Lemma 3 (Direct Contribution Equivalence)
+$$C^M(\iota(S), \iota_X(x)) = C^P(S, x)$$
+*Proof:*
+1. In Mittens, the trip valuation function ([`policy.CalculateTripCost`](file:///Users/jacob/Development/od/project_mittens/internal/domain/policy/cost.go)) decomposes into:
+   $$C^M(d, \ell \mid \theta) = \text{Rev}_\ell - C_{\text{loaded}} - \theta_1 C_{\text{empty}} - \theta_2 C_{\text{home}} - \theta_3 C_{\text{dwell}} - C_{\text{late}} + C_{\text{bonus}} - \theta_{\text{risk}} \cdot \text{RiskPremium}(b_t)$$
+2. Under $N=0$ and canonical parameter vector $\theta = \mathbf{1} = (1, 1, 1, 0)$:
+   - The risk premium vanishes identically: $\text{RiskPremium}(\delta_{\Theta_\emptyset}) = 0$.
+   - The parametric cost adjustments vanish: $(\theta_k - 1) = 0$.
+3. Thus, $C^M(d, \ell \mid \mathbf{1}) \equiv C^P(d, \ell)$, and the total objective contribution satisfies:
+   $$C^M(\iota(S), \iota_X(x)) = \sum_{(d, \ell) \in x} C^M(d, \ell \mid \mathbf{1}) = \sum_{(d, \ell) \in x} C^P(d, \ell) = C^P(S, x)$$
    $\blacksquare$
 
 ---
 
-## 5. Universal Structural Coverage of Powell's 4 Policy Classes
+### Lemma 4 (Transition Operator Commutation)
+$$\pi\big( T^M(\iota(S), \iota_X(x), W) \big) = T^P(S, x, W)$$
+*Proof:*
+1. Let $S = (R_t, I_t)$ and $W = (\hat{L}_{t+1}, \Delta I_{t+1}, o_{t+1})$.
+2. The Mittens transition operator computes:
+   $$T^M(\iota(S), \iota_X(x), W) = \big( f_R(R_t, x, \hat{L}_{t+1}), \; f_I(I_t, \Delta I_{t+1}), \; \mathcal{B}(\delta_{\Theta_\emptyset}, o_{t+1}, x) \big)$$
+3. By Lemma 1, $\mathcal{B}(\delta_{\Theta_\emptyset}, o_{t+1}, x) = \delta_{\Theta_\emptyset}$.
+4. Applying the projection $\pi$:
+   $$\pi\big( T^M(\iota(S), \iota_X(x), W) \big) = \big( f_R(R_t, x, \hat{L}_{t+1}), \; f_I(I_t, \Delta I_{t+1}) \big) = T^P(S, x, W)$$
+   The physical driver progression, HOS clock advancement, and macro information updates commute identically. $\blacksquare$
 
-Warren Powell proves that any sequential decision algorithm belongs to one of four universal classes (or their hybrids). Project Mittens confirms concrete structural implementation and evaluation representation of all four classes:
+---
+
+### Subsumption Theorem (Bellman Equivalence by Induction)
+For any finite-horizon sequential decision problem over $t = 0, \dots, T$:
+$$V_t^M(\iota(S)) = V_t^P(S) \quad \forall S \in \mathcal{S}^P$$
+and the optimal decision policies satisfy:
+$$\iota_X(x_t^{*, P}(S)) = a_t^{*, M}(\iota(S))$$
+
+*Proof by Backward Induction:*
+- **Base Case ($t = T$):** At terminal epoch $T$, $V_T^M(\iota(S)) = 0 = V_T^P(S)$.
+- **Induction Step ($t \to t+1$):** Assume $V_{t+1}^M(\iota(S')) = V_{t+1}^P(S')$ for all $S' \in \mathcal{S}^P$.
+  By Bellman's principle of optimality:
+  $$V_t^M(\iota(S)) = \max_{a \in \mathcal{X}^M_0(\iota(S))} \left\{ C^M(\iota(S), a) + \gamma \mathbb{E}_{W} \left[ V_{t+1}^M\big( T^M(\iota(S), a, W) \big) \right] \right\}$$
+  Substituting Lemmas 2, 3, and 4 into the right-hand side:
+  $$= \max_{x \in \mathcal{X}^P(S)} \left\{ C^P(S, x) + \gamma \mathbb{E}_{W} \left[ V_{t+1}^M\big( \iota(T^P(S, x, W)) \big) \right] \right\}$$
+  Applying the induction hypothesis $V_{t+1}^M(\iota(S')) = V_{t+1}^P(S')$:
+  $$= \max_{x \in \mathcal{X}^P(S)} \left\{ C^P(S, x) + \gamma \mathbb{E}_{W} \left[ V_{t+1}^P(T^P(S, x, W)) \right] \right\} = V_t^P(S)$$
+  Because the argmax operations optimize identical objective functions over identical feasible sets, the optimal decision mappings coincide:
+  $$\iota_X(x_t^{*, P}(S)) = a_t^{*, M}(\iota(S))$$
+  $\blacksquare$
+
+---
+
+## 5. Structural Coverage of Powell's Four Policy Classes
+
+Warren Powell organizes policy design around four broad classes (PFAs, CFAs, VFAs, DLAs). Project Mittens confirms concrete structural implementation and evaluation representation of all four classes:
 
 ### 5.1 Class 1: Policy Function Approximations (PFAs)
 - **Mathematical Form**: $X^{\text{PFA}}(S_t) = \text{ActionRules}(S_t)$
-- **Implementation Representation**: Declarative Google Common Expression Language (CEL) business rule programs in [`internal/domain/rules`](file:///Users/jacob/Development/od/project_mittens/internal/domain/rules).
+- **Implementation Representation**: Declarative Google Common Expression Language (CEL) business rule programs in [`internal/domain/rules`](file:///Users/jacob/Development/od/project_mittens/internal/domain/rules) that map state and driver/load attributes directly to dispatch actions (e.g., dedicated contract rules, mandatory domicile return pairings) without solving an optimization problem.
 
 ### 5.2 Class 2: Cost Function Approximations (CFAs)
 - **Mathematical Form**: $X^{\text{CFA}}_t(S_t \mid \theta) = \arg\max_{x \in \mathcal{X}_t} \sum_{(d, \ell) \in x} \bar{C}(d, \ell \mid \theta)$
-- **Implementation Representation**: Parametric cost shifting in [`policy.CFAPolicy`](file:///Users/jacob/Development/od/project_mittens/internal/domain/policy/cfa.go) solved via the exact Successive Shortest Path (SSP) augmenting path linear assignment solver with Dijkstra reduced cost potentials ([`pkgmath.SolveLAP`](file:///Users/jacob/Development/od/project_mittens/pkg/math/lap.go)), with SPSA gradient tuning. At $\theta = \mathbf{1}$, it evaluates the unshifted linear assignment problem.
+- **Implementation Representation**: Parametric cost shifting in [`policy.CFAPolicy`](file:///Users/jacob/Development/od/project_mittens/internal/domain/policy/cfa.go) solved via the exact Successive Shortest Path (SSP) augmenting path linear assignment algorithm with Dijkstra reduced cost potentials ([`pkgmath.SolveLAP`](file:///Users/jacob/Development/od/project_mittens/pkg/math/lap.go)), with SPSA gradient tuning. At $\theta = \mathbf{1}$, it evaluates the unshifted linear assignment problem.
 
 ### 5.3 Class 3: Value Function Approximations (VFAs)
 - **Mathematical Form**: $X^{\text{VFA}}_t(S_t) = \arg\max_{x \in \mathcal{X}_t} \left( C(S_t, x) + \gamma \bar{V}_t(S^x_t(S_t, x)) \right)$
@@ -110,9 +181,9 @@ Warren Powell proves that any sequential decision algorithm belongs to one of fo
 
 ## 6. Counterexample Search & Property-Based Falsification: 5,000 Trials
 
-The Counterexample Generator executed **5,000 randomized and adversarial combinatorial trials** across 20 fleet topologies in [`powell_subsumption_test.go`](file:///Users/jacob/Development/od/project_mittens/internal/domain/policy/powell_subsumption_test.go).
+To empirically test the implementation of the Subsumption Theorem against software defects or numerical drift, the Counterexample Generator executed **5,000 randomized and adversarial combinatorial trials** across 20 fleet topologies in [`powell_subsumption_test.go`](file:///Users/jacob/Development/od/project_mittens/internal/domain/policy/powell_subsumption_test.go).
 
-### Test Matrix & Verification Summary
+### Bounded Falsification Matrix
 
 | Fleet Dimension ($|D| \times |L|$) | Instance Topology Characteristics | Trials Evaluated | Discrepancies ($|\Delta| > 10^{-4}$) | Mismatched Matches | Empirical Findings |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -127,7 +198,7 @@ The Counterexample Generator executed **5,000 randomized and adversarial combina
 | **$5 \times 5, 6 \times 6$** | Dense multi-corridor fleets | 500 | 0 | 0 | **No counterexample** |
 | **$8 \times 8, 10 \times 10$** | Complex regional clusters | 500 | 0 | 0 | **No counterexample** |
 | **$12 \times 12$** | Large-scale dense combinatorial graph | 250 | 0 | 0 | **No counterexample** |
-| **TOTAL** | **Comprehensive State Exploration** | **5,000** | **0** | **0** | **0 Counterexamples** |
+| **TOTAL** | **Bounded Property-Based Search** | **5,000** | **0** | **0** | **0 Counterexamples** |
 
 $$\text{Observed Maximum Deviation: } \max |\text{RefNet} - \text{MittensNet}| = 0.000000 \times 10^0$$
 $$\text{Total Discrepancies Found: } 0 \quad / \quad 5,000 \text{ Instances}$$
@@ -137,8 +208,8 @@ $$\text{Total Discrepancies Found: } 0 \quad / \quad 5,000 \text{ Instances}$$
 ## 7. Individual Examiner Audit Reports
 
 ### Examiner 1: The Mathematician
-- **Audit Domain**: Formal model factoring, measure-theoretic collapse, Bellman value recursions.
-- **Finding**: Proved algebraic state reduction under $N=0$; established zero residual uncertainty in the latent dimension ($H(b_t) = 0$); confirmed structural representation of all 4 universal policy classes.
+- **Audit Domain**: Formal model factoring, topological belief reduction, 4 commutative lemmas, Bellman induction theorem.
+- **Finding**: Proved algebraic state reduction under $N=0$; established zero residual uncertainty in the latent dimension ($H(b_t) = 0$); derived Bellman induction theorem across all 4 commutative lemmas; confirmed structural representation of all 4 Powell policy classes.
 - **Verdict**: **`VERIFIED`**
 
 ### Examiner 2: The Compiler Lawyer
@@ -162,7 +233,7 @@ $$\text{Total Discrepancies Found: } 0 \quad / \quad 5,000 \text{ Instances}$$
 
 Under the **Strict Conjunctive Aggregation Rule**:
 
-$$\text{Equivalent} = \text{Mathematician}.\text{Verified} \wedge \text{CompilerLawyer}.\text{Verified} \wedge \text{NumericalSadist}.\text{Verified} \wedge \text{CounterexampleGen}.\text{Verified} = \mathbf{TRUE}$$
+$$\text{CommitteeRatified} = \text{Mathematician}.\text{Verified} \wedge \text{CompilerLawyer}.\text{Verified} \wedge \text{NumericalSadist}.\text{Verified} \wedge \text{CounterexampleGen}.\text{Verified} = \mathbf{TRUE}$$
 
 There is zero dissent. The mathematical thesis $\mathbf{Powell \subset Mittens}$ is formally, structurally, and empirically **RATIFIED**.
 

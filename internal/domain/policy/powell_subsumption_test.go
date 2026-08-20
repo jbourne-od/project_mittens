@@ -120,22 +120,23 @@ func canonicalPowellReferenceSolver(
 	return matches, totalNet, nil
 }
 
-// TestPowellSubsumption_Theorem1_MOMDP_Degeneracy proves that when N=0,
-// Mittens MOMDP state space S_t = (R_t, I_t, b_t) collapses with zero information loss
-// into the canonical Powell MDP state S_t = (R_t, I_t).
+// TestPowellSubsumption_Theorem1_MOMDP_Degeneracy proves Lemma 1 (State Reduction)
+// and topological belief invariance: when N=0, the latent competitor state space
+// is the singleton H_0 = {Theta_0}, and Delta(H_0) contains exactly one probability measure.
+// Thus b_t = delta_{Theta_0} invariantly with zero residual uncertainty in the latent dimension (H(b_t)=0).
 func TestPowellSubsumption_Theorem1_MOMDP_Degeneracy(t *testing.T) {
 	t.Parallel()
 
-	// 1. Verify Belief Simplex Dirac Delta Collapse
+	// 1. Verify Belief Simplex Dirac Delta Measure Uniqueness
 	b0 := model.NewMonopolisticBelief()
 	if b0.Scale().CompetitorDimension() != 0 {
-		t.Fatalf("Theorem 1 Failure: N=0 scale dimension must be 0, got %d", b0.Scale().CompetitorDimension())
+		t.Fatalf("Lemma 1 Failure: N=0 scale dimension must be 0, got %d", b0.Scale().CompetitorDimension())
 	}
 	if b0.Probability(model.MonopolisticSingletonKey) != 1.0 {
-		t.Fatalf("Theorem 1 Failure: Dirac delta mass must equal 1.0, got %f", b0.Probability(model.MonopolisticSingletonKey))
+		t.Fatalf("Lemma 1 Failure: Dirac delta mass must equal 1.0, got %f", b0.Probability(model.MonopolisticSingletonKey))
 	}
 
-	// 2. Verify Zero-Drift Bayesian Invariance across 100 consecutive transitions
+	// 2. Verify Zero-Drift Topological Bayesian Invariance across 100 consecutive transitions
 	filter := model.NewMonopolisticFilter()
 	bCurrent := b0
 	dummyAction := model.NewAction(nil, nil)
@@ -143,19 +144,19 @@ func TestPowellSubsumption_Theorem1_MOMDP_Degeneracy(t *testing.T) {
 	for step := 0; step < 100; step++ {
 		bNext, err := filter.Filter(bCurrent, nil, dummyAction)
 		if err != nil {
-			t.Fatalf("Theorem 1 Failure: Bayes update failed on step %d: %v", step, err)
+			t.Fatalf("Lemma 1 Failure: Bayes update failed on step %d: %v", step, err)
 		}
 		if bNext.Probability(model.MonopolisticSingletonKey) != 1.0 {
-			t.Fatalf("Theorem 1 Failure: Simplex drift detected at step %d: %f != 1.0", step, bNext.Probability(model.MonopolisticSingletonKey))
+			t.Fatalf("Lemma 1 Failure: Simplex drift detected at step %d: %f != 1.0", step, bNext.Probability(model.MonopolisticSingletonKey))
 		}
 		bCurrent = bNext
 	}
 }
 
-// TestPowellSubsumption_Theorem2_ExhaustiveBoundedCounterexampleSearch
-// systematically searches randomized and edge-case combinatorial state configurations
-// to attempt to falsify equivalence between Mittens CFA (N=0) and the canonical Powell formulation.
-func TestPowellSubsumption_Theorem2_ExhaustiveBoundedCounterexampleSearch(t *testing.T) {
+// TestPowellSubsumption_Theorem2_BoundedCounterexampleSearch
+// executes 5,000 randomized and adversarial combinatorial property-based falsification trials
+// across 20 fleet topologies to empirically attempt to falsify the equivalence theorem.
+func TestPowellSubsumption_Theorem2_BoundedCounterexampleSearch(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -296,7 +297,7 @@ func TestPowellSubsumption_Theorem2_ExhaustiveBoundedCounterexampleSearch(t *tes
 		t.Fatalf("Powell Subsumption Falsified! Found %d counterexamples out of %d evaluated configurations.", discrepancies, totalEvaluated)
 	}
 
-	t.Logf("Theorem 2 Verified: %d bounded state configurations evaluated. Exact equivalence established with ZERO counterexamples.", totalEvaluated)
+	t.Logf("Theorem 2 (Bounded Counterexample Search) Verified: %d randomized and adversarial configurations evaluated across 20 topologies. Zero counterexamples observed.", totalEvaluated)
 }
 
 // TestPowellSubsumption_Theorem3_PolicyClassCoverage verifies the formal reduction

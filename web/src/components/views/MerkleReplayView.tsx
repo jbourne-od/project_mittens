@@ -9,11 +9,19 @@ interface MerkleReplayViewProps {
 }
 
 export const MerkleReplayView: React.FC<MerkleReplayViewProps> = ({
-  currentRunId = 'RUN-GOLDEN-07',
-  currentDecisionId = 'DEC-07-PARITY-001',
+  currentRunId = '',
+  currentDecisionId = '',
 }) => {
   const [runId, setRunId] = useState(currentRunId);
   const [decisionId, setDecisionId] = useState(currentDecisionId);
+
+  React.useEffect(() => {
+    if (currentRunId) setRunId(currentRunId);
+  }, [currentRunId]);
+
+  React.useEffect(() => {
+    if (currentDecisionId) setDecisionId(currentDecisionId);
+  }, [currentDecisionId]);
 
   const [verifyingChain, setVerifyingChain] = useState(false);
   const [chainResult, setChainResult] = useState<ChainIntegrityResponseDTO | null>(null);

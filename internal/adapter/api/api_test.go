@@ -693,15 +693,16 @@ func TestAPI_ScenarioCatalogEndpoints(t *testing.T) {
 func TestAPI_StaticWebServing(t *testing.T) {
 	srv := api.NewServer(api.DefaultServerConfig())
 
-	// Test GET / (should serve index.html from web/dist if present)
+	// Test GET / (serves index.html from embedded web.Assets)
 	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 	srv.Router().ServeHTTP(rr, req)
 
-	// Since web/dist was built, it should return 200 OK with HTML
-	if rr.Code == http.StatusOK {
-		if !strings.Contains(rr.Body.String(), "Project Mittens") {
-			t.Errorf("expected HTML to contain 'Project Mittens', got: %s", rr.Body.String())
-		}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from GET /, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "html") {
+		t.Errorf("expected HTML response, got: %s", body)
 	}
 }

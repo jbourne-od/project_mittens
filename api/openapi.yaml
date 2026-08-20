@@ -72,6 +72,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/v1/scenarios:
+    get:
+      summary: List all authoritative golden benchmark scenarios and operational datasets
+      description: Returns summaries of available pre-packaged golden test fixtures for interactive simulation and validation.
+      operationId: listScenarios
+      responses:
+        '200':
+          description: List of scenario summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scenarios:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScenarioSummaryDTO'
+                  count:
+                    type: integer
+
+  /api/v1/scenarios/{id}:
+    get:
+      summary: Retrieve complete initial state and configurations for a specific scenario
+      description: Returns the driver fleet, freight loads, and feasibility/cost parameters for the specified scenario.
+      operationId: getScenario
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full scenario detail payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioDetailDTO'
+        '404':
+          description: Scenario not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/v1/decisions:
     get:
       summary: List all recorded optimization decisions from the Semantic Journal
@@ -469,12 +514,68 @@ components:
             $ref: '#/components/schemas/LoadDTO'
         policy_class:
           type: string
-          enum: [CFA, VFA, DLA]
+          enum: [CFA, VFA, PiecewiseVFA, DLA]
           default: "CFA"
         competitor_scale:
           type: integer
           default: 0
           description: "Number of competitor carriers N (0 = Monopolistic baseline)"
+        cost_config:
+          $ref: '#/components/schemas/CostConfigDTO'
+        feasibility_config:
+          $ref: '#/components/schemas/FeasibilityConfigDTO'
+
+    CostConfigDTO:
+      type: object
+      properties:
+        fixed_cost_per_load:
+          type: number
+          format: double
+          example: 50.0
+        loaded_mile_rate:
+          type: number
+          format: double
+          example: 1.50
+        empty_mile_rate:
+          type: number
+          format: double
+          example: 1.20
+        empty_to_home_rate:
+          type: number
+          format: double
+          example: 0.30
+        early_arrival_per_hour:
+          type: number
+          format: double
+          example: 25.0
+        late_delivery_per_hour:
+          type: number
+          format: double
+          example: 75.0
+        driver_bonus_weight:
+          type: number
+          format: double
+          example: 1.0
+
+    FeasibilityConfigDTO:
+      type: object
+      properties:
+        max_deadhead_miles:
+          type: number
+          format: double
+          example: 300.0
+        max_early_dwell_hours:
+          type: number
+          format: double
+          example: 24.0
+        max_late_delivery_hours:
+          type: number
+          format: double
+          example: 4.0
+        average_speed_mph:
+          type: number
+          format: double
+          example: 50.0
 
     MatchDTO:
       type: object
@@ -1181,4 +1282,60 @@ components:
         summary:
           type: string
           example: "Recommended 2 repositioning moves (Total Deadhead Cost: $836.94, Expected Net Lift: $3163.06)"
+
+    ScenarioSummaryDTO:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - category
+        - driver_count
+        - load_count
+        - default_policy
+      properties:
+        id:
+          type: string
+          example: "07_test_dispatch"
+        name:
+          type: string
+          example: "07_test_dispatch (Monopolistic Parity Baseline)"
+        description:
+          type: string
+          example: "Authoritative Java-to-Go parity fixture evaluating single-epoch dispatch with 100% bitwise assignment equivalence."
+        category:
+          type: string
+          example: "Golden Parity"
+        driver_count:
+          type: integer
+          example: 3
+        load_count:
+          type: integer
+          example: 2
+        default_policy:
+          type: string
+          example: "CFA"
+
+    ScenarioDetailDTO:
+      type: object
+      required:
+        - summary
+        - drivers
+        - loads
+      properties:
+        summary:
+          $ref: '#/components/schemas/ScenarioSummaryDTO'
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriverDTO'
+        loads:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoadDTO'
+        cost_config:
+          $ref: '#/components/schemas/CostConfigDTO'
+        feasibility_config:
+          $ref: '#/components/schemas/FeasibilityConfigDTO'
+
 

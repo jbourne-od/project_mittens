@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -69,6 +72,8 @@ func NewServer(cfg ServerConfig) *Server {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/optimize", h.HandleOptimize)
 		r.Post("/simulate", h.HandleSimulate)
+		r.Get("/scenarios", h.HandleListScenarios)
+		r.Get("/scenarios/{id}", h.HandleGetScenario)
 		r.Get("/decisions", h.HandleListDecisions)
 		r.Get("/decisions/{id}", h.HandleGetDecision)
 		r.Get("/decisions/{id}/explain", h.HandleExplainDecision)
@@ -84,6 +89,42 @@ func NewServer(cfg ServerConfig) *Server {
 		// Fleet Repositioning
 		r.Post("/reposition/plan", h.HandleRepositionPlan)
 	})
+
+	// Static Web Frontend (Single Page Application fallback when web/dist is present)
+	candidateDirs := []string{
+		os.Getenv("MITTENS_STATIC_DIR"),
+		"web/dist",
+		"../web/dist",
+		"../../web/dist",
+	}
+	if workDir, err := os.Getwd(); err == nil {
+		candidateDirs = append(candidateDirs, filepath.Join(workDir, "web", "dist"))
+	}
+	var filesDir string
+	for _, dir := range candidateDirs {
+		if dir == "" {
+			continue
+		}
+		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
+			filesDir = dir
+			break
+		}
+	}
+	if filesDir != "" {
+		fileServer := http.FileServer(http.Dir(filesDir))
+		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasPrefix(req.URL.Path, "/api") || strings.HasPrefix(req.URL.Path, "/metrics") || strings.HasPrefix(req.URL.Path, "/healthz") {
+				http.NotFound(w, req)
+				return
+			}
+			fPath := filepath.Join(filesDir, filepath.Clean(req.URL.Path))
+			if fStat, err := os.Stat(fPath); err != nil || fStat.IsDir() {
+				http.ServeFile(w, req, filepath.Join(filesDir, "index.html"))
+				return
+			}
+			fileServer.ServeHTTP(w, req)
+		})
+	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	srv := &http.Server{

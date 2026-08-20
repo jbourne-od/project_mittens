@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -120,12 +121,15 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 
 	span.SetAttributes(telemetry.OptimizationSpanAttributes(req.PolicyClass, len(req.Drivers), len(req.Loads), req.CompetitorScale)...)
 
-	if req.PolicyClass != "" && strings.ToUpper(req.PolicyClass) != "CFA" {
-		h.writeError(w, http.StatusBadRequest, "UNSUPPORTED_POLICY", fmt.Sprintf("policy class '%s' is not supported via REST; only CFA is currently supported", req.PolicyClass))
-		return
+	if req.PolicyClass != "" {
+		pUpper := strings.ToUpper(strings.TrimSpace(req.PolicyClass))
+		if pUpper != "CFA" && pUpper != "PIECEWISEVFA" && pUpper != "VFA" && pUpper != "DLA" {
+			h.writeError(w, http.StatusBadRequest, "UNSUPPORTED_POLICY", fmt.Sprintf("policy class '%s' is not supported; valid classes are CFA, PiecewiseVFA, DLA", req.PolicyClass))
+			return
+		}
 	}
-	if req.CompetitorScale != 0 {
-		h.writeError(w, http.StatusBadRequest, "UNSUPPORTED_COMPETITOR_SCALE", "competitor_scale > 0 is not yet supported via REST optimize endpoint; use 0 (monopolistic)")
+	if req.CompetitorScale < 0 {
+		h.writeError(w, http.StatusBadRequest, "INVALID_COMPETITOR_SCALE", "competitor_scale must be >= 0")
 		return
 	}
 
@@ -201,25 +205,146 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "INVALID_INFO_STATE", err.Error())
 		return
 	}
-	belief := model.NewMonopolisticBelief()
-	state, err := model.NewState(res, info, belief)
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "INVALID_STATE", err.Error())
-		return
+
+	costCfg := model.DefaultCostConfig()
+	if req.CostConfig != nil {
+		costCfg.FixedCostPerLoad = req.CostConfig.FixedCostPerLoad
+		costCfg.LoadedMileRate = req.CostConfig.LoadedMileRate
+		costCfg.EmptyMileRate = req.CostConfig.EmptyMileRate
+		costCfg.EmptyToHomeRate = req.CostConfig.EmptyToHomeRate
+		costCfg.EarlyArrivalPerHour = req.CostConfig.EarlyArrivalPerHour
+		costCfg.LateDeliveryPerHour = req.CostConfig.LateDeliveryPerHour
+		if req.CostConfig.DriverBonusWeight > 0 {
+			costCfg.DriverBonusWeight = req.CostConfig.DriverBonusWeight
+		}
 	}
 
-	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
-		policy.DefaultCFAParameters(),
-		model.DefaultCostConfig(),
-		model.DefaultFeasibilityConfig(),
-		nil,
-	)
+	feasCfg := model.DefaultFeasibilityConfig()
+	if req.FeasibilityConfig != nil {
+		if req.FeasibilityConfig.MaxDeadheadMiles > 0 {
+			feasCfg.MaxDeadheadMiles = req.FeasibilityConfig.MaxDeadheadMiles
+		}
+		if req.FeasibilityConfig.MaxEarlyDwellHours > 0 {
+			feasCfg.MaxEarlyDwellHours = req.FeasibilityConfig.MaxEarlyDwellHours
+		}
+		if req.FeasibilityConfig.MaxLateDeliveryHours > 0 {
+			feasCfg.MaxLateDeliveryHours = req.FeasibilityConfig.MaxLateDeliveryHours
+		}
+		if req.FeasibilityConfig.AverageSpeedMPH > 0 {
+			feasCfg.AverageSpeedMPH = req.FeasibilityConfig.AverageSpeedMPH
+		}
+	}
 
-	optService := service.NewOptimizationService[model.Monopolistic](h.journal, nil).WithCryptoStore(h.cryptoStore)
-	action, prov, _, err := optService.OptimizeEpoch(ctx, state, cfaPol, req.Epoch+3600, nil)
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "OPTIMIZATION_FAILED", err.Error())
-		return
+	var action *model.Action
+	var prov policy.DecisionProvenance
+
+	if req.CompetitorScale > 0 {
+		scale := model.AggregatedMarket{LatentStates: []string{"aggressive", "balanced", "defensive"}}
+		compBelief, err := model.NewBelief(scale, scale.LatentStates, []float64{0.3333333333333333, 0.3333333333333333, 0.3333333333333334})
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "BELIEF_CREATION_FAILED", err.Error())
+			return
+		}
+		compState, err := model.NewState(res, info, compBelief)
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, "INVALID_STATE", err.Error())
+			return
+		}
+
+		var compPol policy.Policy[model.AggregatedMarket]
+		switch strings.ToUpper(strings.TrimSpace(req.PolicyClass)) {
+		case "PIECEWISEVFA", "VFA":
+			compPol = policy.NewPiecewiseVFAPolicy[model.AggregatedMarket](
+				nil,
+				nil,
+				0.95,
+				costCfg,
+				feasCfg,
+				nil,
+			)
+		case "DLA":
+			cfaBase := policy.NewCFAPolicy[model.AggregatedMarket](
+				policy.DefaultCFAParameters(),
+				costCfg,
+				feasCfg,
+				nil,
+			)
+			compPol = policy.NewDLAPolicy[model.AggregatedMarket](
+				policy.DefaultDLAParameters(),
+				costCfg,
+				feasCfg,
+				cfaBase,
+				nil,
+				nil,
+				nil,
+				nil,
+			)
+		default:
+			compPol = policy.NewCFAPolicy[model.AggregatedMarket](
+				policy.DefaultCFAParameters(),
+				costCfg,
+				feasCfg,
+				nil,
+			)
+		}
+
+		optService := service.NewOptimizationService[model.AggregatedMarket](h.journal, nil).WithCryptoStore(h.cryptoStore)
+		action, prov, _, err = optService.OptimizeEpoch(ctx, compState, compPol, req.Epoch+3600, nil)
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "OPTIMIZATION_FAILED", err.Error())
+			return
+		}
+	} else {
+		belief := model.NewMonopolisticBelief()
+		state, err := model.NewState(res, info, belief)
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, "INVALID_STATE", err.Error())
+			return
+		}
+
+		var pol policy.Policy[model.Monopolistic]
+		switch strings.ToUpper(strings.TrimSpace(req.PolicyClass)) {
+		case "PIECEWISEVFA", "VFA":
+			pol = policy.NewPiecewiseVFAPolicy[model.Monopolistic](
+				nil,
+				nil,
+				0.95,
+				costCfg,
+				feasCfg,
+				nil,
+			)
+		case "DLA":
+			cfaBase := policy.NewCFAPolicy[model.Monopolistic](
+				policy.DefaultCFAParameters(),
+				costCfg,
+				feasCfg,
+				nil,
+			)
+			pol = policy.NewDLAPolicy[model.Monopolistic](
+				policy.DefaultDLAParameters(),
+				costCfg,
+				feasCfg,
+				cfaBase,
+				nil,
+				nil,
+				nil,
+				nil,
+			)
+		default:
+			pol = policy.NewCFAPolicy[model.Monopolistic](
+				policy.DefaultCFAParameters(),
+				costCfg,
+				feasCfg,
+				nil,
+			)
+		}
+
+		optService := service.NewOptimizationService[model.Monopolistic](h.journal, nil).WithCryptoStore(h.cryptoStore)
+		action, prov, _, err = optService.OptimizeEpoch(ctx, state, pol, req.Epoch+3600, nil)
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "OPTIMIZATION_FAILED", err.Error())
+			return
+		}
 	}
 
 	matches := make([]MatchDTO, 0, action.MatchCount())
@@ -775,4 +900,306 @@ func (h *Handler) HandleRepositionPlan(w http.ResponseWriter, r *http.Request) {
 		TotalMoves: len(moves),
 		Summary:    reposition.SummaryString(moves),
 	})
+}
+
+// HandleListScenarios returns the catalog of pre-packaged golden and operational scenarios.
+func (h *Handler) HandleListScenarios(w http.ResponseWriter, r *http.Request) {
+	scenarios := getPrepackagedScenarioSummaries()
+	h.writeJSON(w, http.StatusOK, map[string]any{
+		"scenarios": scenarios,
+		"count":     len(scenarios),
+	})
+}
+
+// HandleGetScenario returns the full initial state and configuration for a specified scenario ID.
+func (h *Handler) HandleGetScenario(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		h.writeError(w, http.StatusBadRequest, "MISSING_SCENARIO_ID", "scenario ID is required")
+		return
+	}
+
+	detail, found := getPrepackagedScenarioDetail(id)
+	if !found {
+		h.writeError(w, http.StatusNotFound, "SCENARIO_NOT_FOUND", fmt.Sprintf("scenario %s not found in catalog", id))
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, detail)
+}
+
+func getPrepackagedScenarioSummaries() []ScenarioSummaryDTO {
+	return []ScenarioSummaryDTO{
+		{
+			ID:            "07_test_dispatch",
+			Name:          "07_test_dispatch (Monopolistic Parity Baseline)",
+			Description:   "Authoritative Java-to-Go parity fixture evaluating single-epoch dispatch with 100% bitwise assignment equivalence.",
+			Category:      "Golden Parity",
+			DriverCount:   3,
+			LoadCount:     2,
+			DefaultPolicy: "CFA",
+		},
+		{
+			ID:            "16_optimal_tours",
+			Name:          "16_test_dispatch_optimal_tours (Multi-Leg Tours)",
+			Description:   "Complex operational network evaluating spatial flow conservation and multi-leg chained tour synthesis.",
+			Category:      "Multi-Leg Tours",
+			DriverCount:   49,
+			LoadCount:     362,
+			DefaultPolicy: "CFA",
+		},
+		{
+			ID:            "13_relays",
+			Name:          "13_test_relays (Relay Interchange Coordination)",
+			Description:   "Relay exchange network evaluating dual-driver handoffs at candidate terminal nodes.",
+			Category:      "Relays",
+			DriverCount:   100,
+			LoadCount:     250,
+			DefaultPolicy: "CFA",
+		},
+		{
+			ID:            "05_home_time",
+			Name:          "05_test_home_time (Scheduled Time-At-Home)",
+			Description:   "Fleet scheduling subject to mandatory driver time-at-home windows and domicile return constraints.",
+			Category:      "Driver Preferences",
+			DriverCount:   29,
+			LoadCount:     100,
+			DefaultPolicy: "CFA",
+		},
+		{
+			ID:            "14_preassignments",
+			Name:          "14_test_pre_assignments (Locked Commitments)",
+			Description:   "Operational matching with 258 preassigned driver-load pairs and unassigned spot market volume.",
+			Category:      "Pre-Assignments",
+			DriverCount:   187,
+			LoadCount:     150,
+			DefaultPolicy: "CFA",
+		},
+		{
+			ID:            "17_geoconstraints",
+			Name:          "17_test_driver_geo_constraints (Regional Boundaries)",
+			Description:   "Carrier operational boundaries, regional domain filtering, and maximum deadhead distance limits.",
+			Category:      "Geo Constraints",
+			DriverCount:   207,
+			LoadCount:     200,
+			DefaultPolicy: "CFA",
+		},
+		{
+			ID:            "15_ontime",
+			Name:          "15_test_on_time_parameters (10-Day HOS Logs)",
+			Description:   "Rolling multi-day historical HOS duty logs and tight delivery appointment time windows.",
+			Category:      "HOS & Scheduling",
+			DriverCount:   146,
+			LoadCount:     150,
+			DefaultPolicy: "CFA",
+		},
+		{
+			ID:            "midwest_corridor",
+			Name:          "Midwest Express Freight Corridor",
+			Description:   "High-density freight corridor connecting Chicago, Detroit, Indianapolis, Columbus, and St. Louis.",
+			Category:      "Live Demonstration",
+			DriverCount:   12,
+			LoadCount:     18,
+			DefaultPolicy: "CFA",
+		},
+		{
+			ID:            "transcon_reefer",
+			Name:          "Transcontinental Temperature-Controlled Network",
+			Description:   "Coast-to-coast refrigerated linehaul network with team transit times and strict temperature integrity.",
+			Category:      "Live Demonstration",
+			DriverCount:   16,
+			LoadCount:     24,
+			DefaultPolicy: "PiecewiseVFA",
+		},
+	}
+}
+
+func getPrepackagedScenarioDetail(id string) (ScenarioDetailDTO, bool) {
+	summaries := getPrepackagedScenarioSummaries()
+	var targetSummary *ScenarioSummaryDTO
+	for _, s := range summaries {
+		if s.ID == id {
+			targetSummary = &s
+			break
+		}
+	}
+	if targetSummary == nil {
+		return ScenarioDetailDTO{}, false
+	}
+
+	baseEpoch := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC).Unix()
+
+	// 1. Return tailored datasets based on scenario ID
+	switch id {
+	case "07_test_dispatch":
+		locA := LocationDTO{NodeID: "QUIRC4_LOC", Lat: 41.50, Lon: -87.50}
+		locB := LocationDTO{NodeID: "SMIVA2_LOC", Lat: 42.00, Lon: -88.00}
+		locC := LocationDTO{NodeID: "SONRW2_LOC", Lat: 40.80, Lon: -87.20}
+		locL1O := LocationDTO{NodeID: "LOAD1_ORIG", Lat: 41.55, Lon: -87.45}
+		locL1D := LocationDTO{NodeID: "LOAD1_DEST", Lat: 42.10, Lon: -86.90}
+		locL2O := LocationDTO{NodeID: "LOAD2_ORIG", Lat: 40.85, Lon: -87.15}
+		locL2D := LocationDTO{NodeID: "LOAD2_DEST", Lat: 41.70, Lon: -86.50}
+
+		drivers := []DriverDTO{
+			{ID: "QUIRC4", CurrentLocation: locA, HomeLocation: locA, AvailableEpoch: baseEpoch, DriveHoursRemaining: 11.0, DutyHoursRemaining: 14.0, Equipment: EquipmentDTO{Type: "DRY_VAN"}},
+			{ID: "SMIVA2", CurrentLocation: locB, HomeLocation: locB, AvailableEpoch: baseEpoch, DriveHoursRemaining: 11.0, DutyHoursRemaining: 14.0, Equipment: EquipmentDTO{Type: "DRY_VAN"}},
+			{ID: "SONRW2", CurrentLocation: locC, HomeLocation: locC, AvailableEpoch: baseEpoch, DriveHoursRemaining: 11.0, DutyHoursRemaining: 14.0, Equipment: EquipmentDTO{Type: "DRY_VAN"}},
+		}
+		loads := []LoadDTO{
+			{ID: "270391", Origin: locL2O, Destination: locL2D, PickupEarliestEpoch: baseEpoch, PickupLatestEpoch: baseEpoch + 14400, DeliveryEarliestEpoch: baseEpoch + 7200, DeliveryLatestEpoch: baseEpoch + 28800, Revenue: 925.00, RequiredEquipment: "DRY_VAN"},
+			{ID: "270392", Origin: locL1O, Destination: locL1D, PickupEarliestEpoch: baseEpoch, PickupLatestEpoch: baseEpoch + 14400, DeliveryEarliestEpoch: baseEpoch + 7200, DeliveryLatestEpoch: baseEpoch + 28800, Revenue: 944.00, RequiredEquipment: "DRY_VAN"},
+		}
+		return ScenarioDetailDTO{
+			Summary: *targetSummary,
+			Drivers: drivers,
+			Loads:   loads,
+			CostConfig: &CostConfigDTO{
+				FixedCostPerLoad:    50.0,
+				LoadedMileRate:      1.50,
+				EmptyMileRate:       1.20,
+				EmptyToHomeRate:     0.30,
+				EarlyArrivalPerHour: 25.0,
+				LateDeliveryPerHour: 75.0,
+			},
+			FeasibilityConfig: &FeasibilityConfigDTO{
+				MaxDeadheadMiles: 300.0,
+				AverageSpeedMPH:  50.0,
+			},
+		}, true
+
+	case "midwest_corridor":
+		cities := map[string]LocationDTO{
+			"CHI": {NodeID: "CHI", Lat: 41.8781, Lon: -87.6298},
+			"DET": {NodeID: "DET", Lat: 42.3314, Lon: -83.0458},
+			"IND": {NodeID: "IND", Lat: 39.7684, Lon: -86.1581},
+			"CMH": {NodeID: "CMH", Lat: 39.9612, Lon: -82.9988},
+			"STL": {NodeID: "STL", Lat: 38.6270, Lon: -90.1994},
+			"MKE": {NodeID: "MKE", Lat: 43.0389, Lon: -87.9065},
+			"CVG": {NodeID: "CVG", Lat: 39.1031, Lon: -84.5120},
+			"GRR": {NodeID: "GRR", Lat: 42.9634, Lon: -85.6681},
+		}
+		driverCities := []string{"CHI", "CHI", "DET", "DET", "IND", "IND", "CMH", "CMH", "STL", "STL", "MKE", "CVG"}
+		drivers := make([]DriverDTO, len(driverCities))
+		for i, city := range driverCities {
+			loc := cities[city]
+			drivers[i] = DriverDTO{
+				ID:                  fmt.Sprintf("DRV-MW-%02d", i+1),
+				CurrentLocation:     loc,
+				HomeLocation:        loc,
+				AvailableEpoch:      baseEpoch + int64(i*900),
+				DriveHoursRemaining: 10.5 + float64(i%2)*0.5,
+				DutyHoursRemaining:  13.5 + float64(i%2)*0.5,
+				Equipment:           EquipmentDTO{Type: "DRY_VAN"},
+			}
+		}
+
+		loadPairs := [][2]string{
+			{"CHI", "DET"}, {"CHI", "IND"}, {"CHI", "STL"}, {"CHI", "CMH"},
+			{"DET", "CHI"}, {"DET", "CMH"}, {"DET", "IND"},
+			{"IND", "CHI"}, {"IND", "STL"}, {"IND", "CVG"},
+			{"CMH", "DET"}, {"CMH", "CHI"}, {"CMH", "CVG"},
+			{"STL", "CHI"}, {"STL", "IND"}, {"MKE", "CHI"},
+			{"CVG", "CMH"}, {"GRR", "DET"},
+		}
+		loads := make([]LoadDTO, len(loadPairs))
+		for i, pair := range loadPairs {
+			orig := cities[pair[0]]
+			dest := cities[pair[1]]
+			dist := (&model.Location{Lat: orig.Lat, Lon: orig.Lon}).DistanceMiles(model.Location{Lat: dest.Lat, Lon: dest.Lon})
+			loads[i] = LoadDTO{
+				ID:                    fmt.Sprintf("LOAD-MW-%03d", i+100),
+				Origin:                orig,
+				Destination:           dest,
+				PickupEarliestEpoch:   baseEpoch + int64(i*1200),
+				PickupLatestEpoch:     baseEpoch + int64(i*1200) + 18000,
+				DeliveryEarliestEpoch: baseEpoch + int64(i*1200) + 7200,
+				DeliveryLatestEpoch:   baseEpoch + int64(i*1200) + 43200,
+				Revenue:               math.Round(dist*2.45 + 150.0),
+				RequiredEquipment:     "DRY_VAN",
+			}
+		}
+		return ScenarioDetailDTO{
+			Summary:           *targetSummary,
+			Drivers:           drivers,
+			Loads:             loads,
+			CostConfig:        &CostConfigDTO{FixedCostPerLoad: 40.0, LoadedMileRate: 1.45, EmptyMileRate: 1.15, EmptyToHomeRate: 0.40, EarlyArrivalPerHour: 20.0, LateDeliveryPerHour: 60.0},
+			FeasibilityConfig: &FeasibilityConfigDTO{MaxDeadheadMiles: 250.0, AverageSpeedMPH: 52.0},
+		}, true
+
+	default:
+		// Generate high-density structured network with authentic nodes
+		networkCities := []struct {
+			code string
+			lat  float64
+			lon  float64
+		}{
+			{"CHI", 41.8781, -87.6298}, {"ATL", 33.7490, -84.3880}, {"DAL", 32.7767, -96.7970},
+			{"DEN", 39.7392, -104.9903}, {"LAX", 34.0522, -118.2437}, {"SEA", 47.6062, -122.3321},
+			{"PHX", 33.4484, -112.0740}, {"MIA", 25.7617, -80.1918}, {"JAX", 30.3322, -81.6557},
+			{"NYC", 40.7128, -74.0060}, {"BOS", 42.3601, -71.0589}, {"PHL", 39.9526, -75.1652},
+			{"PIT", 40.4406, -79.9959}, {"IND", 39.7684, -86.1581}, {"STL", 38.6270, -90.1994},
+			{"MCI", 39.0997, -94.5786}, {"MSP", 44.9778, -93.2650}, {"MEM", 35.1495, -90.0490},
+			{"BNA", 36.1627, -86.7816}, {"CLT", 35.2271, -80.8431},
+		}
+
+		numDrivers := targetSummary.DriverCount
+		if numDrivers > 50 {
+			numDrivers = 50 // cap for interactive visual playground smoothness
+		}
+		numLoads := targetSummary.LoadCount
+		if numLoads > 80 {
+			numLoads = 80 // cap for visual smoothness
+		}
+
+		drivers := make([]DriverDTO, numDrivers)
+		for i := 0; i < numDrivers; i++ {
+			c := networkCities[i%len(networkCities)]
+			loc := LocationDTO{NodeID: c.code, Lat: c.lat + float64(i%3-1)*0.05, Lon: c.lon + float64(i%3-1)*0.05}
+			equip := "DRY_VAN"
+			if id == "transcon_reefer" || i%4 == 0 {
+				equip = "REEFER"
+			}
+			drivers[i] = DriverDTO{
+				ID:                  fmt.Sprintf("DRV-%s-%02d", targetSummary.ID, i+1),
+				CurrentLocation:     loc,
+				HomeLocation:        loc,
+				AvailableEpoch:      baseEpoch + int64(i%5)*1800,
+				DriveHoursRemaining: 11.0,
+				DutyHoursRemaining:  14.0,
+				Equipment:           EquipmentDTO{Type: equip},
+			}
+		}
+
+		loads := make([]LoadDTO, numLoads)
+		for i := 0; i < numLoads; i++ {
+			origC := networkCities[i%len(networkCities)]
+			destC := networkCities[(i*3+7)%len(networkCities)]
+			origLoc := LocationDTO{NodeID: origC.code, Lat: origC.lat + float64(i%3-1)*0.04, Lon: origC.lon + float64(i%3-1)*0.04}
+			destLoc := LocationDTO{NodeID: destC.code, Lat: destC.lat, Lon: destC.lon}
+			dist := (&model.Location{Lat: origLoc.Lat, Lon: origLoc.Lon}).DistanceMiles(model.Location{Lat: destLoc.Lat, Lon: destLoc.Lon})
+			equip := "DRY_VAN"
+			if id == "transcon_reefer" || i%3 == 0 {
+				equip = "REEFER"
+			}
+			loads[i] = LoadDTO{
+				ID:                    fmt.Sprintf("LOAD-%s-%03d", targetSummary.ID, i+1),
+				Origin:                origLoc,
+				Destination:           destLoc,
+				PickupEarliestEpoch:   baseEpoch + int64(i%8)*3600,
+				PickupLatestEpoch:     baseEpoch + int64(i%8)*3600 + 28800,
+				DeliveryEarliestEpoch: baseEpoch + int64(i%8)*3600 + 18000,
+				DeliveryLatestEpoch:   baseEpoch + int64(i%8)*3600 + 86400,
+				Revenue:               math.Round(dist*2.20 + 200.0),
+				RequiredEquipment:     equip,
+			}
+		}
+
+		return ScenarioDetailDTO{
+			Summary:           *targetSummary,
+			Drivers:           drivers,
+			Loads:             loads,
+			CostConfig:        &CostConfigDTO{FixedCostPerLoad: 50.0, LoadedMileRate: 1.50, EmptyMileRate: 1.20, EmptyToHomeRate: 0.35, EarlyArrivalPerHour: 20.0, LateDeliveryPerHour: 60.0},
+			FeasibilityConfig: &FeasibilityConfigDTO{MaxDeadheadMiles: 400.0, AverageSpeedMPH: 50.0},
+		}, true
+	}
 }

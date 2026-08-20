@@ -50,13 +50,34 @@ type FacilityDTO struct {
 	AverageDwellMinutes int         `json:"average_dwell_minutes,omitempty"`
 }
 
+// CostConfigDTO encapsulates configurable operational cost parameters.
+type CostConfigDTO struct {
+	FixedCostPerLoad    float64 `json:"fixed_cost_per_load"`
+	LoadedMileRate      float64 `json:"loaded_mile_rate"`
+	EmptyMileRate       float64 `json:"empty_mile_rate"`
+	EmptyToHomeRate     float64 `json:"empty_to_home_rate"`
+	EarlyArrivalPerHour float64 `json:"early_arrival_per_hour"`
+	LateDeliveryPerHour float64 `json:"late_delivery_per_hour"`
+	DriverBonusWeight   float64 `json:"driver_bonus_weight,omitempty"`
+}
+
+// FeasibilityConfigDTO encapsulates network feasibility constraints.
+type FeasibilityConfigDTO struct {
+	MaxDeadheadMiles     float64 `json:"max_deadhead_miles"`
+	MaxEarlyDwellHours   float64 `json:"max_early_dwell_hours,omitempty"`
+	MaxLateDeliveryHours float64 `json:"max_late_delivery_hours,omitempty"`
+	AverageSpeedMPH      float64 `json:"average_speed_mph,omitempty"`
+}
+
 // OptimizeRequest defines the payload for single-epoch matching optimization.
 type OptimizeRequest struct {
-	Epoch           int64       `json:"epoch"`
-	Drivers         []DriverDTO `json:"drivers"`
-	Loads           []LoadDTO   `json:"loads"`
-	PolicyClass     string      `json:"policy_class,omitempty"`
-	CompetitorScale int         `json:"competitor_scale,omitempty"`
+	Epoch             int64                 `json:"epoch"`
+	Drivers           []DriverDTO           `json:"drivers"`
+	Loads             []LoadDTO             `json:"loads"`
+	PolicyClass       string                `json:"policy_class,omitempty"`
+	CompetitorScale   int                   `json:"competitor_scale,omitempty"`
+	CostConfig        *CostConfigDTO        `json:"cost_config,omitempty"`
+	FeasibilityConfig *FeasibilityConfigDTO `json:"feasibility_config,omitempty"`
 }
 
 // MatchDTO represents an individual driver-load assignment in the response.
@@ -211,4 +232,24 @@ type RepositionPlanResponseDTO struct {
 	Moves      []reposition.RepositioningMove `json:"moves"`
 	TotalMoves int                            `json:"total_moves"`
 	Summary    string                         `json:"summary"`
+}
+
+// ScenarioSummaryDTO describes an authoritative golden test scenario or pre-packaged operational dataset.
+type ScenarioSummaryDTO struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Category      string `json:"category"`
+	DriverCount   int    `json:"driver_count"`
+	LoadCount     int    `json:"load_count"`
+	DefaultPolicy string `json:"default_policy"`
+}
+
+// ScenarioDetailDTO provides the full initial resource state and parameters for a golden scenario.
+type ScenarioDetailDTO struct {
+	Summary           ScenarioSummaryDTO    `json:"summary"`
+	Drivers           []DriverDTO           `json:"drivers"`
+	Loads             []LoadDTO             `json:"loads"`
+	CostConfig        *CostConfigDTO        `json:"cost_config,omitempty"`
+	FeasibilityConfig *FeasibilityConfigDTO `json:"feasibility_config,omitempty"`
 }

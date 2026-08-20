@@ -75,29 +75,67 @@ func (ls *LocationStore) GetLocation(id string) (model.Location, bool) {
 func ParseLocations(r io.Reader) (*LocationStore, error) {
 	scanner := bufio.NewScanner(r)
 	locMap := make(map[string]model.Location)
+	var headerMap map[string]int
 
-	isHeader := true
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if isHeader {
-			isHeader = false
+
+		var fields []string
+		if strings.Contains(line, "\t") {
+			fields = strings.Split(line, "\t")
+			for i := range fields {
+				fields[i] = strings.TrimSpace(fields[i])
+			}
+		} else {
+			fields = strings.Fields(line)
+		}
+
+		if headerMap == nil {
+			headerMap = make(map[string]int)
+			for idx, col := range fields {
+				headerMap[strings.ToUpper(col)] = idx
+			}
 			continue
 		}
 
-		fields := strings.Fields(line)
 		if len(fields) < 3 {
 			continue
 		}
 
+		codeIdx, okCode := headerMap["CODE"]
+		latIdx, okLat := headerMap["LAT"]
+		lonIdx, okLon := headerMap["LONG"]
+		if !okLon {
+			lonIdx, okLon = headerMap["LON"]
+		}
+		zipIdx, okZip := headerMap["ZIPCODE"]
+		if !okZip {
+			zipIdx, okZip = headerMap["ZIP"]
+		}
+
 		code := fields[0]
-		lat, err := strconv.ParseFloat(fields[1], 64)
+		if okCode && codeIdx < len(fields) {
+			code = fields[codeIdx]
+		}
+
+		latStr := fields[1]
+		if okLat && latIdx < len(fields) {
+			latStr = fields[latIdx]
+		}
+
+		lonStr := fields[2]
+		if okLon && lonIdx < len(fields) {
+			lonStr = fields[lonIdx]
+		}
+
+		lat, err := strconv.ParseFloat(latStr, 64)
 		if err != nil {
 			continue
 		}
-		lon, err := strconv.ParseFloat(fields[2], 64)
+		lon, err := strconv.ParseFloat(lonStr, 64)
 		if err != nil {
 			continue
 		}
@@ -108,10 +146,25 @@ func ParseLocations(r io.Reader) (*LocationStore, error) {
 			Lon:    lon,
 		}
 		locMap[code] = loc
-		// Also store without leading zeros if applicable
 		trimmedCode := strings.TrimLeft(code, "0")
 		if trimmedCode != "" && trimmedCode != code {
 			locMap[trimmedCode] = loc
+		}
+
+		if okZip && zipIdx < len(fields) {
+			zip := fields[zipIdx]
+			if zip != "" && zip != "." && zip != "NONE" {
+				locZip := model.Location{
+					NodeID: zip,
+					Lat:    lat,
+					Lon:    lon,
+				}
+				locMap[zip] = locZip
+				trimmedZip := strings.TrimLeft(zip, "0")
+				if trimmedZip != "" && trimmedZip != zip {
+					locMap[trimmedZip] = locZip
+				}
+			}
 		}
 	}
 
@@ -165,16 +218,16 @@ func ParseDrivers(r io.Reader, locStore *LocationStore) ([]model.Driver, error) 
 			return ""
 		}
 
-		driverID := getField("DRIVER_ID", "DRVR_ID", "ID")
+		driverID := getField("DRIVER_ID", "DRVR_ID", "ID", "Driver_ID")
 		if driverID == "" && len(fields) > 0 {
 			driverID = fields[0]
 		}
 
-		availDT := getField("DRIVER_DT", "AVAIL_DT", "NEXT_ON_DUTY_DT")
-		availTM := getField("DRIVER_TM", "AVAIL_TM", "NEXT_ON_DUTY_TM")
-		availLocID := getField("DRIVER_LOCATION", "CURR_LOC", "NEXT_ON_DUTY_LOCATION", "LOCATION")
-		homeLocID := getField("HOME", "HOME_LOCATION")
-		equipStr := getField("EQUIPMENT", "EQUIP", "REQ_EQUIP")
+		availDT := getField("DRIVER_DT", "AVAIL_DT", "AVAILABLE_DT", "NEXT_ON_DUTY_DT", "Available_DT")
+		availTM := getField("DRIVER_TM", "AVAIL_TM", "AVAILABLE_TM", "NEXT_ON_DUTY_TM", "Available_TM")
+		availLocID := getField("DRIVER_LOCATION", "AVAILABLE_LOCATION", "CURR_LOC", "NEXT_ON_DUTY_LOCATION", "LOCATION", "Available_Location")
+		homeLocID := getField("HOME", "HOME_LOCATION", "HOME_LOC", "Home")
+		equipStr := getField("EQUIPMENT", "EQUIP", "REQ_EQUIP", "Equipment")
 
 		// Positional fallback if headers not found
 		if availLocID == "" && len(fields) >= 6 {
@@ -184,6 +237,12 @@ func ParseDrivers(r io.Reader, locStore *LocationStore) ([]model.Driver, error) 
 			homeLocID = fields[2]
 			if len(fields) >= 7 {
 				equipStr = fields[6]
+			}
+		}
+
+		if availLocID == "" || availLocID == "NONE" || availLocID == "." {
+			if homeLocID != "" && homeLocID != "NONE" && homeLocID != "." {
+				availLocID = homeLocID
 			}
 		}
 
@@ -443,4 +502,168 @@ func parseLegacyDateTime(dtStr, tmStr string) (int64, error) {
 		return 0, err
 	}
 	return t.UTC().Unix(), nil
+}
+
+// ParsePreAssignments parses a legacy preassignments.txt file into a map of LoadID -> DriverID.
+func ParsePreAssignments(r io.Reader) (map[string]string, error) {
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	preassignments := make(map[string]string)
+	var headerMap map[string]int
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		var fields []string
+		if strings.Contains(line, "\t") {
+			fields = strings.Split(line, "\t")
+			for i := range fields {
+				fields[i] = strings.TrimSpace(fields[i])
+			}
+		} else {
+			fields = strings.Fields(line)
+		}
+
+		if headerMap == nil {
+			headerMap = make(map[string]int)
+			for idx, col := range fields {
+				headerMap[strings.ToUpper(col)] = idx
+			}
+			continue
+		}
+
+		loadIdx, okL := headerMap["LOAD_ID"]
+		drvrIdx, okD := headerMap["DRVR_ID"]
+		if !okD {
+			drvrIdx, okD = headerMap["DRIVER_ID"]
+		}
+
+		if okL && okD && loadIdx < len(fields) && drvrIdx < len(fields) {
+			loadID := fields[loadIdx]
+			driverID := fields[drvrIdx]
+			if loadID != "" && driverID != "" && driverID != "NONE" && driverID != "." {
+				preassignments[loadID] = driverID
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("legacy: failed reading preassignments: %w", err)
+	}
+
+	return preassignments, nil
+}
+
+// ParseRelays parses a legacy RC_all_relays.txt or allPossibleRelays.txt file into a slice of candidate relay node IDs.
+func ParseRelays(r io.Reader) ([]string, error) {
+	scanner := bufio.NewScanner(r)
+	relaySet := make(map[string]bool)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+			nodeID := fields[0]
+			if nodeID != "" && nodeID != "NONE" && nodeID != "." {
+				relaySet[nodeID] = true
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("legacy: failed reading relays: %w", err)
+	}
+
+	relays := make([]string, 0, len(relaySet))
+	for r := range relaySet {
+		relays = append(relays, r)
+	}
+	return relays, nil
+}
+
+// TimeAtHomeSchedule represents a scheduled time-off window for a driver.
+type TimeAtHomeSchedule struct {
+	DriverID       string
+	StartEpoch     int64
+	EndEpoch       int64
+	ReturnLocation string
+}
+
+// ParseTimeAtHomeSchedules parses legacy driverTAHSchedules.txt or tah_schedule.txt into a map of DriverID -> schedules.
+func ParseTimeAtHomeSchedules(r io.Reader) (map[string][]TimeAtHomeSchedule, error) {
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	schedules := make(map[string][]TimeAtHomeSchedule)
+	var headerMap map[string]int
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		var fields []string
+		if strings.Contains(line, "\t") {
+			fields = strings.Split(line, "\t")
+			for i := range fields {
+				fields[i] = strings.TrimSpace(fields[i])
+			}
+		} else {
+			fields = strings.Fields(line)
+		}
+
+		if headerMap == nil {
+			headerMap = make(map[string]int)
+			for idx, col := range fields {
+				headerMap[strings.ToUpper(col)] = idx
+			}
+			continue
+		}
+
+		getField := func(names ...string) string {
+			for _, n := range names {
+				if idx, ok := headerMap[strings.ToUpper(n)]; ok && idx < len(fields) {
+					return fields[idx]
+				}
+			}
+			return ""
+		}
+
+		driverID := getField("DRIVER_ID", "DRVR_ID")
+		stDT := getField("SCHEDULED_TIME_OFF_ST_DT", "TIME_OFF_ST_DT", "ST_DT")
+		stTM := getField("SCHEDULED_TIME_OFF_ST_TM", "TIME_OFF_ST_TM", "ST_TM")
+		endDT := getField("SCHEDULED_TIME_OFF_END_DT", "TIME_OFF_END_DT", "END_DT")
+		endTM := getField("SCHEDULED_TIME_OFF_END_TM", "TIME_OFF_END_TM", "END_TM")
+		retLoc := getField("SCHEDULED_TIME_OFF_RETURN_LOC", "RETURN_LOC")
+
+		stEpoch, _ := parseLegacyDateTime(stDT, stTM)
+		endEpoch, _ := parseLegacyDateTime(endDT, endTM)
+
+		if driverID != "" && stEpoch > 0 {
+			sched := TimeAtHomeSchedule{
+				DriverID:       driverID,
+				StartEpoch:     stEpoch,
+				EndEpoch:       endEpoch,
+				ReturnLocation: retLoc,
+			}
+			schedules[driverID] = append(schedules[driverID], sched)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("legacy: failed reading TAH schedules: %w", err)
+	}
+
+	return schedules, nil
 }

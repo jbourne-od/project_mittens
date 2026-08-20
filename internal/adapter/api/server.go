@@ -3,9 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/service"
 	pkgjournal "github.com/optimaldynamics/project-mittens/pkg/journal"
 	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
+	"github.com/optimaldynamics/project-mittens/web"
 )
 
 // ServerConfig configures the HTTP REST API server.
@@ -129,38 +131,47 @@ func NewServer(cfg ServerConfig) *Server {
 		r.Post("/reposition/plan", h.HandleRepositionPlan)
 	})
 
-	// Static Web Frontend (Single Page Application fallback when web/dist is present)
-	candidateDirs := []string{
-		os.Getenv("MITTENS_STATIC_DIR"),
-		"web/dist",
-		"../web/dist",
-		"../../web/dist",
-	}
-	if workDir, err := os.Getwd(); err == nil {
-		candidateDirs = append(candidateDirs, filepath.Join(workDir, "web", "dist"))
-	}
-	var filesDir string
-	for _, dir := range candidateDirs {
-		if dir == "" {
-			continue
-		}
-		if stat, err := os.Stat(dir); err == nil && stat.IsDir() {
-			filesDir = dir
-			break
+	// Static Web Frontend (Embedded SPA with filesystem override)
+	var staticFS fs.FS
+	if customDir := os.Getenv("MITTENS_STATIC_DIR"); customDir != "" {
+		if stat, err := os.Stat(customDir); err == nil && stat.IsDir() {
+			staticFS = os.DirFS(customDir)
 		}
 	}
-	if filesDir != "" {
-		fileServer := http.FileServer(http.Dir(filesDir))
+	if staticFS == nil {
+		if sub, err := fs.Sub(web.Assets, "dist"); err == nil {
+			staticFS = sub
+		}
+	}
+
+	if staticFS != nil {
+		fileServer := http.FileServer(http.FS(staticFS))
 		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api") || strings.HasPrefix(req.URL.Path, "/metrics") || strings.HasPrefix(req.URL.Path, "/healthz") {
 				http.NotFound(w, req)
 				return
 			}
-			fPath := filepath.Join(filesDir, filepath.Clean(req.URL.Path))
-			if fStat, err := os.Stat(fPath); err != nil || fStat.IsDir() {
-				http.ServeFile(w, req, filepath.Join(filesDir, "index.html"))
+
+			path := strings.TrimPrefix(req.URL.Path, "/")
+			if path == "" {
+				path = "index.html"
+			}
+
+			f, err := staticFS.Open(path)
+			if err != nil {
+				// SPA Client-side Route Fallback -> serve index.html
+				indexF, err := staticFS.Open("index.html")
+				if err != nil {
+					http.NotFound(w, req)
+					return
+				}
+				defer indexF.Close()
+				stat, _ := indexF.Stat()
+				http.ServeContent(w, req, "index.html", stat.ModTime(), indexF.(io.ReadSeeker))
 				return
 			}
+			defer f.Close()
+
 			fileServer.ServeHTTP(w, req)
 		})
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
+	"github.com/optimaldynamics/project-mittens/pkg/journal"
 )
 
 // JournalEntry models an append-only, tamper-proof record of a single optimization epoch allocation.
@@ -22,6 +23,7 @@ type JournalEntry struct {
 	TotalNetContribution float64                   `json:"total_net_contribution"`
 	Matches              []model.DriverLoadMatch   `json:"matches"`
 	Provenance           policy.DecisionProvenance `json:"provenance"`
+	CryptographicRecord  journal.JournalRecord     `json:"cryptographic_record,omitempty"`
 }
 
 // Journal defines the interface for persisting optimization decision audit trails.

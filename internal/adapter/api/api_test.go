@@ -385,7 +385,44 @@ func TestAPI_SemanticJournalAndExplainability(t *testing.T) {
 		t.Errorf("expected driver D1 and load L1 in explain markdown, got: %s", explainDTO.Markdown)
 	}
 
-	// 5. Test GET /api/v1/decisions/NON_EXISTENT/explain (404 NOT FOUND)
+	// 5. Test POST /api/v1/decisions/{id}/replay
+	replayReq, _ := http.NewRequest(http.MethodPost, "/api/v1/decisions/"+optResp.DecisionID+"/replay", nil)
+	replayRR := httptest.NewRecorder()
+	srv.Router().ServeHTTP(replayRR, replayReq)
+
+	if replayRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from POST /api/v1/decisions/{id}/replay, got %d: %s", replayRR.Code, replayRR.Body.String())
+	}
+
+	var replayDTO api.ReplayResponseDTO
+	if err := json.NewDecoder(replayRR.Body).Decode(&replayDTO); err != nil {
+		t.Fatalf("failed decoding replay response: %v", err)
+	}
+	if !replayDTO.IsBitExact {
+		t.Fatalf("expected bit-exact replay verification, got drifts: %v", replayDTO.DriftDetails)
+	}
+	if !replayDTO.InitialStateHashMatch || !replayDTO.ActionHashMatch {
+		t.Errorf("expected state and action hash matches in replay")
+	}
+
+	// 6. Test GET /api/v1/runs/{id}/integrity
+	integrityReq, _ := http.NewRequest(http.MethodGet, "/api/v1/runs/RUN-CFA/integrity", nil)
+	integrityRR := httptest.NewRecorder()
+	srv.Router().ServeHTTP(integrityRR, integrityReq)
+
+	if integrityRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from GET /api/v1/runs/{id}/integrity, got %d", integrityRR.Code)
+	}
+
+	var integrityDTO api.ChainIntegrityResponseDTO
+	if err := json.NewDecoder(integrityRR.Body).Decode(&integrityDTO); err != nil {
+		t.Fatalf("failed decoding integrity response: %v", err)
+	}
+	if !integrityDTO.IsValid {
+		t.Errorf("expected valid cryptographic chain for RUN-CFA, got invalid status: %s", integrityDTO.Status)
+	}
+
+	// 7. Test GET /api/v1/decisions/NON_EXISTENT/explain (404 NOT FOUND)
 	notFoundReq, _ := http.NewRequest(http.MethodGet, "/api/v1/decisions/NON_EXISTENT_ID/explain", nil)
 	notFoundRR := httptest.NewRecorder()
 	srv.Router().ServeHTTP(notFoundRR, notFoundReq)

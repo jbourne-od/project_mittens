@@ -286,6 +286,7 @@ func (rs *ResourceState) Transition(matches []DriverLoadMatch, newLoads []Load) 
 		load := rs.loads[rs.loadIndex[m.LoadID]]
 
 		d := nextDrivers[idx]
+		priorLoc := d.CurrentLocation
 		d.CurrentLocation = load.Destination
 		d.AvailableEpoch = m.DispatchEpoch + load.EstimatedTransitEpochs
 		d.AssignedLoadID = "" // Load completed upon transition to next epoch
@@ -298,7 +299,7 @@ func (rs *ResourceState) Transition(matches []DriverLoadMatch, newLoads []Load) 
 		// Advance clocks if present
 		if d.Clocks != nil {
 			sim := hos.NewSimulator()
-			deadheadMiles := d.CurrentLocation.DistanceMiles(load.Origin)
+			deadheadMiles := priorLoc.DistanceMiles(load.Origin)
 			loadedMiles := load.Origin.DistanceMiles(load.Destination)
 			dhMin := int(math.Ceil(deadheadMiles / 50.0 * 60.0))
 			lhMin := int(math.Ceil(loadedMiles / 50.0 * 60.0))

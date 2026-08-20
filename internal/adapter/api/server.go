@@ -72,6 +72,8 @@ func NewServer(cfg ServerConfig) *Server {
 		r.Get("/decisions", h.HandleListDecisions)
 		r.Get("/decisions/{id}", h.HandleGetDecision)
 		r.Get("/decisions/{id}/explain", h.HandleExplainDecision)
+		r.Post("/decisions/{id}/replay", h.HandleReplayDecision)
+		r.Get("/runs/{id}/integrity", h.HandleVerifyRunIntegrity)
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)

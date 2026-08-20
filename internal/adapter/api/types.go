@@ -144,3 +144,32 @@ type ExplainResponseDTO struct {
 	Explanation any    `json:"explanation"` // *explain.DecisionExplanation
 	Markdown    string `json:"markdown"`
 }
+
+// ReplayResponseDTO encapsulates verification findings from an offline deterministic re-execution.
+type ReplayResponseDTO struct {
+	DecisionID                string   `json:"decision_id"`
+	RunID                     string   `json:"run_id"`
+	Epoch                     int64    `json:"epoch"`
+	PolicyName                string   `json:"policy_name"`
+	IsBitExact                bool     `json:"is_bit_exact"`
+	InitialStateHashMatch     bool     `json:"initial_state_hash_match"`
+	ActionHashMatch           bool     `json:"action_hash_match"`
+	RecordedActionHash        string   `json:"recorded_action_hash"`
+	ReplayedActionHash        string   `json:"replayed_action_hash"`
+	RecordedMatchesCount      int      `json:"recorded_matches_count"`
+	ReplayedMatchesCount      int      `json:"replayed_matches_count"`
+	RecordedNetContribution   float64  `json:"recorded_net_contribution"`
+	ReplayedNetContribution   float64  `json:"replayed_net_contribution"`
+	ContributionDelta         float64  `json:"contribution_delta"`
+	ReplayDurationMicrosecond int64    `json:"replay_duration_us"`
+	DriftDetails              []string `json:"drift_details,omitempty"`
+}
+
+// ChainIntegrityResponseDTO encapsulates Merkle hash chain continuity verification for an optimization run.
+type ChainIntegrityResponseDTO struct {
+	RunID            string `json:"run_id"`
+	IsValid          bool   `json:"is_valid"`
+	LatestRecordHash string `json:"latest_record_hash,omitempty"`
+	BrokenRecordID   string `json:"broken_record_id,omitempty"`
+	Status           string `json:"status"`
+}

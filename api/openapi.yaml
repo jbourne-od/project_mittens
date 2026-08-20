@@ -132,8 +132,51 @@ paths:
           description: Decision not found
           content:
             application/json:
+  /api/v1/decisions/{id}/replay:
+    post:
+      summary: Offline deterministic decision replay & cryptographic verification
+      description: Re-executes an optimization decision in strict isolation against recorded journal inputs and asserts bit-exact action and state parity.
+      operationId: replayDecision
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "DEC-CFA-1700000000-0001"
+      responses:
+        '200':
+          description: Deterministic replay verification report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayResponseDTO'
+        '404':
+          description: Decision or cryptographic record not found
+          content:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/runs/{id}/integrity:
+    get:
+      summary: Validate run Merkle hash chain continuity
+      description: Validates cryptographic link continuity across all decision records in an optimization run.
+      operationId: verifyRunIntegrity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "RUN-CFA"
+      responses:
+        '200':
+          description: Chain integrity verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChainIntegrityResponseDTO'
 
   /healthz:
     get:
@@ -604,3 +647,100 @@ components:
           type: string
           description: Rendered GitHub-Flavored Markdown report
           example: "# Optimization Decision Explanation\n\n### Operational Overview..."
+
+    ReplayResponseDTO:
+      type: object
+      required:
+        - decision_id
+        - run_id
+        - epoch
+        - policy_name
+        - is_bit_exact
+        - initial_state_hash_match
+        - action_hash_match
+        - recorded_action_hash
+        - replayed_action_hash
+        - recorded_matches_count
+        - replayed_matches_count
+        - recorded_net_contribution
+        - replayed_net_contribution
+        - contribution_delta
+        - replay_duration_us
+      properties:
+        decision_id:
+          type: string
+          example: "DEC-CFA-1700000000-0001"
+        run_id:
+          type: string
+          example: "RUN-CFA"
+        epoch:
+          type: integer
+          format: int64
+          example: 1700000000
+        policy_name:
+          type: string
+          example: "CFA"
+        is_bit_exact:
+          type: boolean
+          example: true
+        initial_state_hash_match:
+          type: boolean
+          example: true
+        action_hash_match:
+          type: boolean
+          example: true
+        recorded_action_hash:
+          type: string
+          example: "a1b2c3d4..."
+        replayed_action_hash:
+          type: string
+          example: "a1b2c3d4..."
+        recorded_matches_count:
+          type: integer
+          example: 15
+        replayed_matches_count:
+          type: integer
+          example: 15
+        recorded_net_contribution:
+          type: number
+          format: double
+          example: 18450.00
+        replayed_net_contribution:
+          type: number
+          format: double
+          example: 18450.00
+        contribution_delta:
+          type: number
+          format: double
+          example: 0.00
+        replay_duration_us:
+          type: integer
+          format: int64
+          example: 3420
+        drift_details:
+          type: array
+          items:
+            type: string
+
+    ChainIntegrityResponseDTO:
+      type: object
+      required:
+        - run_id
+        - is_valid
+        - status
+      properties:
+        run_id:
+          type: string
+          example: "RUN-CFA"
+        is_valid:
+          type: boolean
+          example: true
+        latest_record_hash:
+          type: string
+          example: "f8e7d6c5..."
+        broken_record_id:
+          type: string
+        status:
+          type: string
+          example: "VALID"
+

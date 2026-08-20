@@ -8,6 +8,7 @@ import (
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
+	pkgjournal "github.com/optimaldynamics/project-mittens/pkg/journal"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
 	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -18,6 +19,7 @@ import (
 // full decision provenance to the Semantic Journal.
 type OptimizationService[C model.CompetitorScale] struct {
 	journal      Journal
+	cryptoStore  pkgjournal.JournalStore
 	logger       *slog.Logger
 	beliefFilter *model.BeliefFilter[C]
 }
@@ -31,9 +33,23 @@ func NewOptimizationService[C model.CompetitorScale](journal Journal, logger *sl
 		logger = logging.NewNop()
 	}
 	return &OptimizationService[C]{
-		journal: journal,
-		logger:  logger,
+		journal:     journal,
+		cryptoStore: pkgjournal.NewMemoryStore(),
+		logger:      logger,
 	}
+}
+
+// WithCryptoStore sets a custom JournalStore (e.g. FileStore or persistent store).
+func (s *OptimizationService[C]) WithCryptoStore(store pkgjournal.JournalStore) *OptimizationService[C] {
+	if store != nil {
+		s.cryptoStore = store
+	}
+	return s
+}
+
+// CryptoStore returns the active cryptographic journal store instance.
+func (s *OptimizationService[C]) CryptoStore() pkgjournal.JournalStore {
+	return s.cryptoStore
 }
 
 // WithBeliefFilter configures an active Bayesian belief filter for competitive market updates.
@@ -105,29 +121,15 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: action validation failed: %w", err)
 	}
 
-	// 3. Record in Semantic Journal
+	// 3. Encode Initial State & Action Hashes for Cryptographic Provenance
+	initialStateHash, _ := pkgjournal.HashState(state)
+	rBytes, _, _ := pkgjournal.EncodeCanonicalResource(state.Resource())
+	iBytes, _, _ := pkgjournal.EncodeCanonicalInformation(state.Information())
+	bBytes, _, _ := pkgjournal.EncodeCanonicalBelief(state.Belief())
+	aBytes, aHash, _ := pkgjournal.EncodeCanonicalAction(action)
+
 	decisionID := GenerateDecisionID(pol.Name(), currentEpoch, s.journal.Count()+1)
 	prov.OptimizationRunID = decisionID
-	entry := JournalEntry{
-		DecisionID:           decisionID,
-		BatchEpoch:           currentEpoch,
-		PolicyName:           pol.Name(),
-		MatchedCount:         action.MatchCount(),
-		TotalObjective:       prov.TotalObjectiveValue,
-		TotalNetContribution: prov.TotalNetContribution,
-		Matches:              action.Matches(),
-		Provenance:           prov,
-	}
-	_, journalSpan := telemetry.StartSpan(ctx, "SemanticJournal.RecordDecision")
-	journalSpan.SetAttributes(
-		attribute.String("journal.decision_id", decisionID),
-		attribute.Int("journal.matched_count", action.MatchCount()),
-		attribute.Float64("journal.net_contribution", prov.TotalNetContribution),
-	)
-	if err := s.journal.Record(ctx, entry); err != nil {
-		logger.WarnContext(ctx, "failed to record journal entry", slog.String("error", err.Error()))
-	}
-	journalSpan.End()
 
 	// 4. Physical Resource Transition R_{t+1}
 	_, transSpan := telemetry.StartSpan(ctx, "State.ResourceTransition")
@@ -165,11 +167,11 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 	if nextEpoch <= currentEpoch {
 		nextEpoch = currentEpoch + 3600 // Default 1 hour advance if not specified
 	}
-	spotRate := state.Information().NationalSpotRateIndex()
 	fuelPrice := state.Information().FuelPriceIndex()
-	realizedCount := len(newLoads)
+	spotRate := state.Information().NationalSpotRateIndex()
+	weatherAlerts := state.Information().WeatherAlertCount()
 
-	nextInfo, err := state.Information().Transition(nextEpoch, spotRate, fuelPrice, realizedCount)
+	nextInfo, err := state.Information().Transition(nextEpoch, fuelPrice, spotRate, weatherAlerts)
 	if err != nil {
 		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: info transition failed: %w", err)
@@ -182,6 +184,77 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: next state construction failed: %w", err)
 	}
 
+	// 8. Seal Cryptographic Journal Record & Merkle Chain Link
+	nextStateHash, _ := pkgjournal.HashState(nextState)
+	runID := fmt.Sprintf("RUN-%s", pol.Name())
+	prevHash := pkgjournal.GenesisPrevHash
+	if lastRec, ok := s.cryptoStore.LastRecord(runID); ok {
+		prevHash = lastRec.RecordHash
+	}
+
+	paramHash := pkgjournal.ComputeSHA256([]byte(pol.Name()))
+	if len(prov.ThetaParameters) > 0 {
+		if pHash, err := pkgjournal.HashParameters(prov.ThetaParameters); err == nil {
+			paramHash = pHash
+		}
+	}
+
+	cryptoRec := pkgjournal.JournalRecord{
+		RunID:                 runID,
+		Epoch:                 currentEpoch,
+		BatchSeq:              s.journal.Count() + 1,
+		DecisionID:            decisionID,
+		PrevRecordHash:        prevHash,
+		RuntimeVersion:        pkgjournal.CurrentRuntimeVersion,
+		PolicyName:            pol.Name(),
+		PolicyParamHash:       paramHash,
+		InitialStateHash:      initialStateHash,
+		ResourceStateBytes:    rBytes,
+		InformationStateBytes: iBytes,
+		BeliefStateBytes:      bBytes,
+		ActionHash:            aHash,
+		ActionBytes:           aBytes,
+		MatchedCount:          action.MatchCount(),
+		EvaluatedArcsCount:    len(prov.EvaluatedArcs),
+		TotalNetContribution:  prov.TotalNetContribution,
+		NextStateHash:         nextStateHash,
+	}
+	cryptoRec.Seal()
+	if err := s.cryptoStore.Append(cryptoRec); err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		telemetry.RecordInvariantFailure(ctx, "CryptoJournalAppendFailure")
+		logger.ErrorContext(ctx, "failed appending to cryptographic journal", slog.String("error", err.Error()))
+		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to commit cryptographic journal record: %w", err)
+	}
+
+	// 9. Record in Semantic Journal
+	entry := JournalEntry{
+		DecisionID:           decisionID,
+		BatchEpoch:           currentEpoch,
+		PolicyName:           pol.Name(),
+		MatchedCount:         action.MatchCount(),
+		TotalObjective:       prov.TotalObjectiveValue,
+		TotalNetContribution: prov.TotalNetContribution,
+		Matches:              action.Matches(),
+		Provenance:           prov,
+		CryptographicRecord:  cryptoRec,
+	}
+	_, journalSpan := telemetry.StartSpan(ctx, "SemanticJournal.RecordDecision")
+	journalSpan.SetAttributes(
+		attribute.String("journal.decision_id", decisionID),
+		attribute.Int("journal.matched_count", action.MatchCount()),
+		attribute.Float64("journal.net_contribution", prov.TotalNetContribution),
+		attribute.String("journal.record_hash", cryptoRec.RecordHash),
+	)
+	if err := s.journal.Record(ctx, entry); err != nil {
+		journalSpan.End()
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		telemetry.RecordInvariantFailure(ctx, "SemanticJournalRecordFailure")
+		logger.ErrorContext(ctx, "failed to record journal entry", slog.String("error", err.Error()))
+		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to commit semantic journal entry: %w", err)
+	}
+	journalSpan.End()
+
 	durationSec := time.Since(startTime).Seconds()
 	telemetry.RecordOptimizationDuration(ctx, durationSec, pol.Name(), "success")
 	telemetry.RecordMatchesProduced(ctx, int64(action.MatchCount()), pol.Name())
@@ -189,6 +262,8 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 	span.SetAttributes(
 		attribute.Int("optimization.match_count", action.MatchCount()),
 		attribute.Float64("optimization.net_contribution", prov.TotalNetContribution),
+		attribute.String("optimization.decision_id", decisionID),
+		attribute.String("optimization.record_hash", cryptoRec.RecordHash),
 	)
 
 	logger.InfoContext(ctx, "epoch optimization completed",
@@ -197,6 +272,7 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 		slog.Float64("net_contribution", prov.TotalNetContribution),
 		slog.Int("remaining_loads", len(nextResource.Loads())),
 		slog.Int("active_drivers", len(nextResource.Drivers())),
+		slog.String("record_hash", cryptoRec.RecordHash),
 	)
 
 	return action, prov, nextState, nil

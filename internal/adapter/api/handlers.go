@@ -15,6 +15,8 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/service"
 	"github.com/optimaldynamics/project-mittens/internal/service/dispatch"
 	"github.com/optimaldynamics/project-mittens/pkg/explain"
+	pkgjournal "github.com/optimaldynamics/project-mittens/pkg/journal"
+	"github.com/optimaldynamics/project-mittens/pkg/replay"
 	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -43,8 +45,9 @@ type ServerState struct {
 
 // Handler provides HTTP request handling methods.
 type Handler struct {
-	state   *ServerState
-	journal service.Journal
+	state       *ServerState
+	journal     service.Journal
+	cryptoStore pkgjournal.JournalStore
 }
 
 // NewHandler initializes a new Handler with an optional Semantic Journal instance.
@@ -59,7 +62,8 @@ func NewHandler(journal ...service.Journal) *Handler {
 		state: &ServerState{
 			StartTime: time.Now().UTC(),
 		},
-		journal: j,
+		journal:     j,
+		cryptoStore: pkgjournal.NewMemoryStore(),
 	}
 }
 
@@ -468,5 +472,138 @@ func (h *Handler) HandleExplainDecision(w http.ResponseWriter, r *http.Request) 
 		DecisionID:  decisionID,
 		Explanation: explanation,
 		Markdown:    md,
+	})
+}
+
+// HandleReplayDecision performs an offline, bit-exact re-evaluation of a past decision.
+func (h *Handler) HandleReplayDecision(w http.ResponseWriter, r *http.Request) {
+	ctx, span := telemetry.StartSpan(r.Context(), "HTTP.POST.api.v1.decisions.replay")
+	defer span.End()
+
+	decisionID := chi.URLParam(r, "id")
+	if decisionID == "" {
+		h.writeError(w, http.StatusBadRequest, "MISSING_DECISION_ID", "decision ID path parameter is required")
+		return
+	}
+
+	entry, found := h.journal.GetEntry(decisionID)
+	if !found {
+		h.writeError(w, http.StatusNotFound, "DECISION_NOT_FOUND", fmt.Sprintf("no journal entry found for decision ID '%s'", decisionID))
+		return
+	}
+
+	cryptoRec := entry.CryptographicRecord
+	if cryptoRec.DecisionID == "" {
+		if rec, err := h.cryptoStore.Get(decisionID); err == nil {
+			cryptoRec = rec
+		} else {
+			h.writeError(w, http.StatusNotFound, "CRYPTO_RECORD_NOT_FOUND", fmt.Sprintf("no cryptographic record found for decision ID '%s'", decisionID))
+			return
+		}
+	}
+
+	if cryptoRec.PolicyName != "" && !strings.HasPrefix(strings.ToUpper(cryptoRec.PolicyName), "CFA") {
+		h.writeError(w, http.StatusBadRequest, "UNSUPPORTED_REPLAY_POLICY", fmt.Sprintf("policy class '%s' is not supported via REST replay; only CFA is currently supported", cryptoRec.PolicyName))
+		return
+	}
+
+	// Reconstruct state and policy from cryptographic bytes
+	res, err := pkgjournal.DecodeCanonicalResource(cryptoRec.ResourceStateBytes)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "STATE_DECODING_FAILED", fmt.Sprintf("failed decoding recorded resource state: %v", err))
+		return
+	}
+	info, err := pkgjournal.DecodeCanonicalInformation(cryptoRec.InformationStateBytes)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "STATE_DECODING_FAILED", fmt.Sprintf("failed decoding recorded information state: %v", err))
+		return
+	}
+	belief, err := pkgjournal.DecodeCanonicalBelief(model.Monopolistic{}, cryptoRec.BeliefStateBytes)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "STATE_DECODING_FAILED", fmt.Sprintf("failed decoding recorded belief state: %v", err))
+		return
+	}
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "STATE_RECONSTRUCTION_FAILED", err.Error())
+		return
+	}
+
+	policyParams := policy.DefaultCFAParameters()
+	if len(entry.Provenance.ThetaParameters) > 0 {
+		policyParams = policy.CFAParametersFromSlice(entry.Provenance.ThetaParameters)
+	}
+
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
+		policyParams,
+		model.DefaultCostConfig(),
+		model.DefaultFeasibilityConfig(),
+		nil,
+	)
+
+	replayEngine, err := replay.NewReplayEngine[model.Monopolistic](cfaPol)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "REPLAY_ENGINE_INIT_FAILED", err.Error())
+		return
+	}
+
+	report, err := replayEngine.ReplayDecision(ctx, cryptoRec, state)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "REPLAY_FAILED", err.Error())
+		return
+	}
+
+	span.SetAttributes(
+		attribute.String("decision.id", decisionID),
+		attribute.Bool("replay.is_bit_exact", report.IsBitExact),
+	)
+
+	h.writeJSON(w, http.StatusOK, ReplayResponseDTO{
+		DecisionID:                decisionID,
+		RunID:                     report.RunID,
+		Epoch:                     report.Epoch,
+		PolicyName:                report.PolicyName,
+		IsBitExact:                report.IsBitExact,
+		InitialStateHashMatch:     report.InitialStateHashMatch,
+		ActionHashMatch:           report.ActionHashMatch,
+		RecordedActionHash:        report.RecordedActionHash,
+		ReplayedActionHash:        report.ReplayedActionHash,
+		RecordedMatchesCount:      report.RecordedMatchesCount,
+		ReplayedMatchesCount:      report.ReplayedMatchesCount,
+		RecordedNetContribution:   report.RecordedNetContribution,
+		ReplayedNetContribution:   report.ReplayedNetContribution,
+		ContributionDelta:         report.ContributionDelta,
+		ReplayDurationMicrosecond: report.ReplayDurationMicrosecond,
+		DriftDetails:              report.DriftDetails,
+	})
+}
+
+// HandleVerifyRunIntegrity validates the cryptographic hash chain continuity of an optimization run.
+func (h *Handler) HandleVerifyRunIntegrity(w http.ResponseWriter, r *http.Request) {
+	_, span := telemetry.StartSpan(r.Context(), "HTTP.GET.api.v1.runs.integrity")
+	defer span.End()
+
+	runID := chi.URLParam(r, "id")
+	if runID == "" {
+		h.writeError(w, http.StatusBadRequest, "MISSING_RUN_ID", "run ID path parameter is required")
+		return
+	}
+
+	valid, lastHash, err := h.cryptoStore.VerifyRunChain(runID)
+	status := "VALID"
+	brokenID := ""
+	if !valid || err != nil {
+		status = "CORRUPTED"
+		if err != nil {
+			brokenID = err.Error()
+		}
+	}
+
+	h.writeJSON(w, http.StatusOK, ChainIntegrityResponseDTO{
+		RunID:            runID,
+		IsValid:          valid,
+		LatestRecordHash: lastHash,
+		BrokenRecordID:   brokenID,
+		Status:           status,
 	})
 }

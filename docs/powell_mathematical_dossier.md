@@ -11,9 +11,9 @@
 
 Project Mittens models dynamic carrier dispatch and freight revenue management under uncertainty using the **Sequential Decision Analytics (SDA)** framework (Powell, 2022).
 
-The core thesis of Project Mittens is twofold:
-1. **Canonical Subsumption:** The monopolistic carrier dispatch problem ($N=0$) is strictly isomorphic to Powell's canonical SDA formulation.
-2. **Competitive Generalization:** For $N \ge 1$, Mittens generalizes the state space to a Partially Observable Markov Decision Process (MOMDP/POMDP) with endogenous pricing levers and recursive Bayesian belief tracking.
+The core architectural thesis of Project Mittens comprises two distinct results:
+1. **Canonical Subsumption ($N=0$):** The monopolistic fleet dispatch problem is strictly isomorphic to Powell's canonical SDA formulation.
+2. **Competitive Generalization ($N \ge 1$):** In competitive freight markets, the problem is formulated as a Mixed-Observable Markov Decision Process (MOMDP) operated via a fully observable belief-state SDA representation $S_t = (R_t, I_t, b_t)$ and solved via structured approximate policy classes.
 
 To formalize this, we define the **parametric family of sequential decision models** $\mathcal{M}_N$ indexed by competitor fleet dimension $N \in \mathbb{N}_0$:
 
@@ -25,11 +25,11 @@ $$\mathcal{M}_N = \left( \mathcal{S}_N, \mathcal{A}_N, \mathcal{W}_N, \mathbb{P}
 │                                                                                                  │
 │   N = 0: Monopolistic Dispatch (P_canonical)               N ≥ 1: Endogenous Competitive MOMDP   │
 │   ┌──────────────────────────────────────────────┐        ┌────────────────────────────────────┐ │
-│   │ • State: S_0 = (R_t, I_t, δ_{Θ_∅}) ≅ (R_t, I_t)│      │ • State: S_N = (R_t, I_t, b_t)     │ │
-│   │ • Action: a_t = (x_t, ∅) ≅ x_t               │        │ • Action: a_t = (x_t, p_t)         │ │
-│   │ • Exogenous Info: W_{t+1} = (L̂_{t+1}, ΔI_{t+1})│      │ • Exogenous: W_{t+1} = (L̂, ΔI, O)  │ │
-│   │ • Revenue: Exogenous Contract Tariff r_ℓ     │        │ • Revenue: Endogenous Bid Price p_ℓ│ │
-│   │ • Transition: Kernel K_0 ≅ K_Powell          │        │ • Transition: Bayes Filter b_{t+1} │ │
+│   │ • State: S_0 = (R_t, I_t, δ_{Θ_∅}) ≅ (R_t, I_t)│      │ • Underlying State: X_t = (R, I, Θ)│ │
+│   │ • Action: a_t = (x_t, ∅) ≅ x_t               │        │ • Belief-State: S_N = (R, I, b_t)  │ │
+│   │ • Exogenous Info: W_{t+1} = (L̂_{t+1}, ΔI_{t+1})│      │ • Action: a_t = (x_t, p_t)         │ │
+│   │ • Revenue: Exogenous Contract Tariff r_ℓ     │        │ • Exogenous: W_{t+1} = (L̂, ΔI, O)  │ │
+│   │ • Transition: Kernel K_0 ≅ K_Powell          │        │ • Revenue: Endogenous Bid Price p_ℓ│ │
 │   └──────────────────────┬───────────────────────┘        └─────────────────┬──────────────────┘ │
 │                          │                                                  │                    │
 │                          └────────────────────────┬─────────────────────────┘                    │
@@ -75,11 +75,16 @@ For $N \ge 1$, $N$ represents the integer count of competitor fleets active in t
 
 ## 2. The 5 Core Elements of the Sequential Decision Problem
 
-### 2.1 State Space $\mathcal{S}_N$
+### 2.1 State Space & Belief-State SDA Reduction
+In competitive markets ($N \ge 1$), the underlying physical and market state is a Mixed-Observable Markov Decision Process:
+$$X_t = (R_t, I_t, \Theta_t)$$
+where $(R_t, I_t)$ is fully observable and $\Theta_t \in \mathcal{H}_N = \{\theta_1, \dots, \theta_K\}$ is the partially observable latent competitor posture.
+
+Because the filtered posterior $b_t(\theta) = \Pr(\Theta_t = \theta \mid \text{history}_t)$ is a sufficient statistic for history, the problem is formulated in Powell's SDA framework as a fully observable MDP on **belief space**:
 $$S_t = (R_t, I_t, b_t) \in \mathcal{R} \times \mathcal{I} \times \Delta(\mathcal{H}_N)$$
 * **Resource State ($R_t \in \mathcal{R}$):** Fleet physical state: driver spatial locations $(lat, lon)$, domiciles, equipment types (Dry Van, Reefer, Flatbed, Hazmat, Team), regulatory Hours-of-Service clocks (11h drive, 14h duty, 70h cycle), and active load cards.
 * **Information State ($I_t \in \mathcal{I}$):** Exogenous macro variables: spot diesel fuel index $(\$/\text{gal})$, regional load-to-truck density ratios, and weather alerts.
-* **Belief / Knowledge State ($b_t \in \Delta(\mathcal{H}_N)$):** Probability distribution over discrete competitor posture regimes $\Theta_t \in \mathcal{H}_N = \{\theta_1, \dots, \theta_K\}$:
+* **Belief / Knowledge State ($b_t \in \Delta(\mathcal{H}_N)$):** Categorical distribution over competitor posture regimes $\Theta_t \in \mathcal{H}_N = \{\theta_1, \dots, \theta_K\}$:
   $$b_t = \left( b_t(\theta_1), \dots, b_t(\theta_K) \right), \quad \sum_{k=1}^K b_t(\theta_k) = 1.0, \quad b_t(\theta_k) \ge 0$$
 
 ---
@@ -182,16 +187,16 @@ Construct the directed flow network $G = (\mathcal{V}, \mathcal{E})$ from source
 1. **Source $s$:** Supply $+|\mathcal{D}_t|$.
 2. **Driver Nodes $d \in \mathcal{D}_t$:** Arcs $(s, d)$ with capacity $u_{s, d} = 1$, cost $0$.
 3. **Idle/Dummy Arcs:** Arcs $(d, t)$ with capacity $1$, cost $0$, permitting unassigned drivers to remain idle without penalty.
-4. **Load Split Nodes $\ell \in \mathcal{L}_t$:** To enforce 1-to-1 matching, split each load into $\ell^{\text{in}} \to \ell^{\text{out}}$ with arc capacity $u_{\ell^{\text{in}}, \ell^{\text{out}}} = 1$, cost $0$. Driver-load arcs $(d, \ell^{\text{in}})$ have capacity $1$ and cost $-C(d, \ell)$.
+4. **Load Split Nodes $\ell \in \mathcal{L}_t$:** Split each load into $\ell^{\text{in}} \to \ell^{\text{out}}$ with arc capacity $u_{\ell^{\text{in}}, \ell^{\text{out}}} = 1$, cost $0$, enforcing 1-to-1 matching. Driver-load arcs $(d, \ell^{\text{in}})$ have capacity $1$ and cost $-C(d, \ell)$.
 5. **Regional Marginal Slot Nodes $(r, k)$:** For $r \in \mathcal{R}$ and $k = n_r^0 + 1, \dots, n_r^0 + |\mathcal{D}_t|$, arc $(\ell^{\text{out}}, (r, k))$ exists if $r = \text{dest}(\ell)$ with capacity $1$, cost $0$.
 6. **Terminal Arcs to Sink $t$:** Arcs $((r, k), t)$ have capacity $u_{(r, k), t} = 1$ and cost $-\gamma \bar{v}_r(k)$. Sink $t$ has demand $-|\mathcal{D}_t|$.
 
-Because marginal slopes are non-increasing ($\bar{v}_r(k) \ge \bar{v}_r(k+1) \implies -\gamma \bar{v}_r(k) \le -\gamma \bar{v}_r(k+1)$), any min-cost flow algorithm saturates slot $(r, k)$ before $(r, k+1)$. By total unimodularity of the node-arc incidence matrix, all extreme points are integer. Using the **successive shortest path algorithm with node potentials**, the exact integer optimum is computed in $\mathcal{O}(|\mathcal{D}_t| \cdot |\mathcal{E}| \log |\mathcal{V}|)$. *(In local single-driver regional approximations, this reduces directly to the standard bipartite LAP solved via Jonker-Volgenant).* $\blacksquare$
+Because marginal slopes are non-increasing ($\bar{v}_r(k) \ge \bar{v}_r(k+1) \implies -\gamma \bar{v}_r(k) \le -\gamma \bar{v}_r(k+1)$), there exists an optimal flow solution with prefix occupancy of each region's marginal slots (and if slopes are strictly decreasing, every optimal solution strictly utilizes slot $(r, k)$ before $(r, k+1)$). Any optimal solution can be canonicalized into prefix form without altering the objective, guaranteeing $\sum_{j=1}^{n_r} \bar{v}_r(j) = \bar{V}_r(n_r)$. By total unimodularity, all extreme points are integer. Using the **successive shortest path algorithm with node potentials**, the exact integer optimum is computed in $\mathcal{O}(|\mathcal{D}_t| \cdot |\mathcal{E}| \log |\mathcal{V}|)$. *(In local single-driver regional approximations, this reduces directly to the standard bipartite LAP solved via Jonker-Volgenant).* $\blacksquare$
 
 ---
 
 ### 3.4 The Competitive POMDP Model & Belief-Aware Approximate Policy
-In the full competitive problem ($N \ge 1$), the true belief-state continuation value involves joint epistemic updates:
+In competitive markets ($N \ge 1$), the true belief-state continuation value involves joint epistemic updates:
 $$\mathbb{E}\left[ \bar{V}(R_{t+1}, b_{t+1}) \;\middle|\; R_t, b_t, x_t, p_t \right]$$
 Because auction outcomes from multiple simultaneous tenders update a single shared market belief vector $b_{t+1} = \tau(b_t, p_t, O_{t+1})$, the future epistemic value of information $\mathbb{E}[V_b(b_{t+1})]$ does not decouple edgewise across loads.
 
@@ -212,8 +217,12 @@ The optimal joint policy is given by:
 $$x^* = \arg\max_{x \in \mathcal{X}_t} \sum_{d \in \mathcal{D}_t} \sum_{\ell \in \mathcal{L}_t} w_{d, \ell}^* x_{d, \ell}, \qquad p_{d, \ell}^* = \arg\max_{p \in \mathcal{P}_\ell} w_{d, \ell}(p)$$
 preserving exact linear bipartite assignment structure over $x$ with pre-optimized scalar edge weights $w_{d, \ell}^*$. $\blacksquare$
 
-#### Dual Gauge Normalization & Sample-Path Supergradients:
-In bipartite matching with slack nodes for unassigned assets, setting the slack dual gauge $v_{\text{slack}} = 0$ eliminates additive translation invariance ($u_i \leftarrow u_i + c, v_j \leftarrow v_j - c$). Under this normalization, any optimal dual vector $u^{*, n} \in \partial^+ z(R_t; W^{(n)})$ defines a valid **sample-path supergradient** of the realized linear program. Under standard dominated-integrability regularity conditions ($\mathbb{E}[u^{*, n} \mid R_t] \in \partial^+ \bar{z}(R_t)$), these sample potentials provide valid stochastic supergradient estimates for CAVE leveling (`internal/service/vfa_learner.go`) with Robbins-Monro step-size sequences.
+#### Dual Gauge Normalization & Stochastic Supergradients:
+In bipartite matching with slack nodes for unassigned assets, setting the slack dual gauge $v_{\text{slack}} = 0$ eliminates additive translation invariance ($u_i \leftarrow u_i + c, v_j \leftarrow v_j - c$). For each realized sample $W \sim \mathbb{P}(\cdot \mid I_t)$, the normalized LP dual $u^*(W)$ satisfies the pathwise concave inequality for all $R'$:
+$$z(R', W) \le z(R, W) + u^*(W)^T (R' - R)$$
+When $W \sim \mathbb{P}(\cdot \mid I_t)$ is drawn independently of the resource perturbation $R' - R$, taking expectations under this sampling distribution yields:
+$$\mathbb{E}[z(R', W) \mid I_t] \le \mathbb{E}[z(R, W) \mid I_t] + \mathbb{E}[u^*(W) \mid I_t]^T (R' - R)$$
+Therefore, $\mathbb{E}[u^*(W) \mid I_t] \in \partial^+ \bar{z}(R \mid I_t)$, proving that $u^*(W)$ is an unbiased stochastic supergradient sample of the expected post-decision objective function, suitable for CAVE leveling (`internal/service/vfa_learner.go`) with Robbins-Monro step-size sequences.
 
 ---
 
@@ -246,23 +255,23 @@ Let $\mathcal{F}_t^{\text{blind}} = \sigma(R_{0:t}, I_{0:t}, b_0)$ and $\mathcal
 
 ---
 
-### 4.2 Empirical $2 \times 2$ Factorial Decomposition & Option Value
-Across 100 paired 7-day carrier simulation episodes ($N=100$, $df=99$):
+### 4.2 Empirical $2 \times 2$ Factorial Decomposition in Competitive Markets ($N = N^* \ge 1$)
+Holding the competitive market environment fixed at $N = N^* \ge 1$, we independently ablate **information tracking** (blind prior $b_0$ vs. informed posterior $b_t$) and **pricing control** (fixed tariff $\mathcal{P}^{\text{fixed}} = \{p^{\text{tariff}}\}$ vs. flexible bid pricing $\mathcal{P}^{\text{flex}} = [\underline{p}, \bar{p}]$) across 100 paired 7-day carrier simulation episodes ($N=100$, $df=99$):
 
 $$\begin{array}{r|cc|c}
 & \textbf{Blind Belief } (b_0) & \textbf{Informed Belief } (b_t) & \textbf{Marginal VoI} \\
 \hline
-\textbf{Legacy Action } (\mathcal{P}_t^0 = \{\varnothing\}) & V_{00} = \$16,418.54 & V_{01} = \$16,297.45 & -\$121.09 \\
-\textbf{Competitive Action } (\mathcal{P}_t) & V_{10} = \$16,567.82 & V_{11} = \$20,166.25 & +\$3,598.43 \\
+\textbf{Fixed Tariff } (\mathcal{P}^{\text{fixed}}) & V_{00} = \$16,418.54 & V_{01} = \$16,297.45 & -\$121.09 \\
+\textbf{Flexible Pricing } (\mathcal{P}^{\text{flex}}) & V_{10} = \$16,567.82 & V_{11} = \$20,166.25 & +\$3,598.43 \\
 \hline
 \textbf{Marginal VoA} & +\$149.28 & +\$3,868.80 & \text{Total Lift: } +\$3,747.71
 \end{array}$$
 
 #### Factorial Analysis & Option Value Interpretation:
 1. **The Negative Marginal Information Effect ($V_{01} - V_{00} = -\$121.09$):**  
-   In cell $V_{01}$, pricing is disabled ($\mathcal{P}_t^0 = \{\varnothing\}$), but the dispatch policy incorporates the belief vector $b_t$ via a **lane-specific posterior risk variance penalty**:
+   In cell $V_{01}$, pricing is held fixed ($\mathcal{P}^{\text{fixed}}$), but the dispatch policy incorporates belief $b_t$ via a **lane-specific posterior risk variance penalty**:
    $$\text{Penalty}_\ell(b_t) = \theta_{\text{risk}} \cdot \text{Var}_{\Theta \sim b_t}\left[ g_\ell(\Theta) \right] = \theta_{\text{risk}} \sum_{k=1}^K b_t(\theta_k) \left( g_\ell(\theta_k) - \bar{g}_\ell(b_t) \right)^2$$
-   where $g_\ell(\theta_k)$ represents lane congestion risk under posture $\theta_k$. Under fixed contractual tariffs, this defensive posture slightly suppresses accepted load volume in volatile regimes without the pricing flexibility to demand compensatory premiums, producing a minor observed sample drag ($-\$121.09$).
+   where $g_\ell(\theta_k)$ represents lane congestion pressure under posture $\theta_k$. Under fixed contractual tariffs, this defensive posture slightly suppresses accepted load volume in volatile regimes without the pricing flexibility to demand compensatory premiums, producing a minor observed sample drag ($-\$121.09$).
 2. **Supermodular Interaction ($\Delta_{\text{int}} = +\$3,719.52$, $p < 10^{-4}$):**  
    When market intelligence is coupled with the pricing lever ($V_{11}$), the carrier monetizes the information by raising rates on high-risk lanes, converting defensive avoidance into highly profitable targeted bidding ($+\$3,598.43$ marginal lift).
 3. **Factorial Main Effects:**
@@ -283,4 +292,4 @@ $$\begin{array}{r|cc|c}
 4. **“Prove that setting $\theta=0$ in your CFA produces the deadhead-minimizing PFA you claim it implements.”**  
    *Answer:* PFA is the **Constructive Greedy Priority Dispatch Rule** $X^{\text{PFA}}(S_t \mid \theta) = f_\theta(S_t)$ (Section 3.1, Chapter 12), which performs zero LAP optimization. Setting $\theta = 0$ in CFA recovers the **Myopic Base Optimization Policy** $X^{\text{Myopic}}(S_t) = \arg\max_{x \in \mathcal{X}_t} C(S_t, x)$ (Chapter 13).
 5. **“Why is the particular Jonker-Volgenant row potential $u_d$, which may depend on dual normalization, the economically identified marginal value of an additional resource?”**  
-   *Answer:* By **Dual Gauge Normalization** (Section 3.3). In bipartite matching with slack nodes for unassigned assets, fixing $v_{\text{slack}} = 0$ eliminates shift invariance, identifying $u_d^{*, n} \in \partial^+ z(R_t; W^{(n)})$ as a valid normalized **sample-path supergradient** of the concave value function with respect to driver capacity.
+   *Answer:* By **Dual Gauge Normalization** (Section 3.3). In bipartite matching with slack nodes for unassigned assets, fixing $v_{\text{slack}} = 0$ eliminates shift invariance, identifying $u_d^*(W)$ as an unbiased **stochastic supergradient** sample of the expected post-decision value function $\mathbb{E}[z(R, W) \mid I_t]$ with respect to driver capacity.

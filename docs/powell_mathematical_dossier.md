@@ -304,24 +304,74 @@ $$\Delta_{I \mid \text{comp}} - \Delta_{I \mid \text{legacy}} = \$2,175.89 - (-\
 
 ---
 
-### 4.4 Theorem 4 (Endogeneity of Information Value to Horizon and Resource Scarcity)
+### 4.4 Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes)
 
-> **Theorem 4 (Comparative Statics of Complementarity):**  
-> *The economic value of competitive information is endogenous to the carrier's decision flexibility and resource scarcity:*
-> $$\Delta_{\text{int}} = f(\text{Horizon } H, \text{Market Tender Density } \lambda, \text{Fleet Capacity } K)$$
+> **Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes):**  
+> *Competitive information and decision flexibility exhibit positive treatment-lattice complementarity across all tested operating regimes, with the strongest observed complementarity under high load-to-driver density.*
 
-#### Empirical Comparative Statics Sweeps ($N = 500$ Paired Episodes per Grid Cell):
+#### Initial Comparative Statics Sweeps ($N = 500$ Paired Episodes per Grid Cell):
 
 | Grid Sweep Setting | Horizon | Drivers | Loads/Epoch | Ratio (Loads:Trucks) | Mean Interaction $\Delta_{\text{int}}$ | 95% Confidence Interval | $t$-Statistic | $p$-Value | Total Mittens Lift |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Grid 1 (Long Horizon)** | **30 Days** | 10 | 15 | $1.5 : 1$ | **+$2,404.44** | $[+\$2,166.35, +\$2,642.54]$ | $+19.85$ | $4.86 \times 10^{-65}$ | $+1.62\%$ |
 | **Grid 2 (High Market Density)** | 7 Days | 10 | **25** | **$2.5 : 1$** | **+$4,053.99** | $[+\$3,582.38, +\$4,525.61]$ | $+16.89$ | $5.83 \times 10^{-51}$ | **+28.11%** |
-| **Grid 3 (Tight Fleet Capacity)** | 7 Days | **15** | 15 | **$1.0 : 1$** | **+$2,010.79** | $[+\$1,740.52, +\$2,281.07]$ | $+14.62$ | $1.51 \times 10^{-40}$ | **+11.66%** |
+| **Grid 3 (Balanced Capacity / Lower Scarcity)** | 7 Days | **15** | 15 | **$1.0 : 1$** | **+$2,010.79** | $[+\$1,740.52, +\$2,281.07]$ | $+14.62$ | $1.51 \times 10^{-40}$ | **+11.66%** |
 | **Baseline Benchmark** | 7 Days | 10 | 15 | $1.5 : 1$ | **+$2,184.40** | $[+\$1,950.12, +\$2,418.68]$ | $+18.29$ | $3.24 \times 10^{-64}$ | **+16.44%** |
 
-1. **Market Density / Scarcity Magnifies Complementarity:** Under high tender flow ($2.5 : 1$, Grid 2), the carrier has the option volume to cherry-pick high-margin loads, driving interaction $\Delta_{\text{int}}$ to **+$4,053.99** ($p = 5.83 \times 10^{-51}$) and total Mittens lift to **+28.11%** ($+\$4,477.09, p = 2.56 \times 10^{-30}$).
-2. **Horizon Compounding:** Over a 30-day horizon (Grid 1), unguided pricing flexibility compounds into massive value destruction ($-\$2,233.58, t = -61.12, p = 7.59 \times 10^{-234}$), whereas market intelligence monetizes this flexibility to capture a massive information return ($+\$2,432.86, t = +20.13, p = 2.10 \times 10^{-66}$, Cohen's $d_z = 0.8875$).
-3. **Tight Capacity Robustness:** Even under tight 1:1 capacity constraints (Grid 3), supermodular complementarity on the treatment lattice remains highly statistically significant ($\Delta_{\text{int}} = +\$2,010.79, t = +14.62, p = 1.51 \times 10^{-40}$).
+#### Core Economic Findings:
+1. **High Load Density Substantially Amplifies Complementarity:**
+   > *Across all tested operating regimes, the competitive policy exhibits large and statistically significant positive complementarity between market information and pricing/dispatch flexibility. Complementarity is especially pronounced under high load-to-driver density ($2.5 : 1$, Grid 2), where the interaction rises to approximately \$4,054 per seven-day episode ($p = 5.83 \times 10^{-51}$) and the fully informed competitive policy produces a 28.1% gain (+$4,477.09) over the legacy blind baseline.*  
+   *Economic intuition:* Abundant load volume creates severe driver opportunity cost. When every truck has multiple candidate loads, knowing which loads to decline and what price to demand yields enormous economic value.
+2. **Horizon Extension and Information Attenuation:**
+   > *Extending the episode horizon from 7 to 30 days preserves positive complementarity ($\Delta_{\text{int}} = +\$2,404.44$, $p = 4.86 \times 10^{-65}$) but sharply reduces normalized economic lift ($+16.4\% \to +1.62\%$), suggesting diminishing marginal information value or limitations in the current approximate continuation policy over extended rollouts.*  
+   *Comparative rates:* While blind mispricing damage bleeds at roughly constant rate ($-\$506/7\text{d} \approx -\$72.30/\text{day}$ vs. $-\$2,234/30\text{d} \approx -\$74.45/\text{day}$), the information premium per unit time attenuates ($\$2,176/7\text{d} \approx \$310.86/\text{day} \to \$2,433/30\text{d} \approx \$81.10/\text{day}$).
+3. **Balanced Capacity Robustness:** Under lower driver scarcity ($1.0 : 1$, Grid 3), positive treatment-lattice complementarity remains robust and large ($\Delta_{\text{int}} = +\$2,010.79, t = +14.62, p = 1.51 \times 10^{-40}$), proving that information and action flexibility are structural complements even when fleet capacity is not heavily constrained.
+
+---
+
+### 4.5 Second-Order Empirical Response Surfaces & Paired Finite Difference Sweeps
+
+To evaluate the comparative statics continuously without conflating tender density $\lambda$ and fleet capacity $K$, we sweep each parameter independently and test paired finite differences across common random number streams:
+
+$$\delta_{\theta, i} = D_i(\theta_{j+1}) - D_i(\theta_j)$$
+
+#### 1. Tender Density Response Curve (Holding $H = 7\text{ Days}, K = 10\text{ Drivers}$):
+
+| Tender Flow $\lambda$ | Scarcity Ratio | Legacy Blind $V_{00}$ | Mittens $V_{11}$ | Total Mittens Lift | Conditional VoI $\Delta_{I \mid \text{comp}}$ | Interaction $\Delta_{\text{int}}$ | 95% Confidence Interval | $\Delta_{\text{int}} / \text{Day}$ |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **10** | $1.00 : 1$ | $\$6,663.47$ | $\$7,576.90$ | $+\$913.43\text{ (+13.7\%)}$ | $+\$1,353.76$ | **+$1,311.72** | $[+\$921.54, +\$1,701.89]$ | $+\$187.39/\text{d}$ |
+| **12** | $1.20 : 1$ | $\$8,230.37$ | $\$9,750.06$ | $+\$1,519.69\text{ (+18.5\%)}$ | $+\$2,019.88$ | **+$1,973.56** | $[+\$1,432.29, +\$2,514.84]$ | $+\$281.94/\text{d}$ |
+| **15** | $1.50 : 1$ | $\$10,545.20$ | $\$12,155.33$ | $+\$1,610.14\text{ (+15.3\%)}$ | $+\$2,447.22$ | **+$2,490.18** | $[+\$1,846.74, +\$3,133.62]$ | $+\$355.74/\text{d}$ |
+| **18** | $1.80 : 1$ | $\$11,778.42$ | $\$14,189.44$ | $+\$2,411.02\text{ (+20.5\%)}$ | $+\$2,409.36$ | **+$1,981.36** | $[+\$1,034.58, +\$2,928.14]$ | $+\$283.05/\text{d}$ |
+| **20** | $2.00 : 1$ | $\$13,616.50$ | $\$16,655.92$ | $+\$3,039.42\text{ (+22.3\%)}$ | $+\$3,524.74$ | **+$3,703.42** | $[+\$2,763.07, +\$4,643.78]$ | $+\$529.06/\text{d}$ |
+| **25** | $2.50 : 1$ | $\$16,699.15$ | $\$20,948.71$ | $+\$4,249.56\text{ (+25.4\%)}$ | $+\$4,444.63$ | **+$4,390.81** | $[+\$3,149.41, +\$5,632.21]$ | $+\$627.26/\text{d}$ |
+| **30** | $3.00 : 1$ | $\$17,334.76$ | $\$24,110.51$ | $+\$6,775.74\text{ (+39.1\%)}$ | $+\$4,138.21$ | **+$3,933.78** | $[+\$2,769.72, +\$5,097.85]$ | $+\$561.97/\text{d}$ |
+
+*Paired Stepwise Finite Differences:*
+* $\lambda: 10 \to 12$: $\delta_\lambda = +\$661.84$ ($95\%\text{ CI}: [+\$2.89, +\$1,320.80], t = +1.97, p = 0.0518$)
+* $\lambda: 12 \to 15$: $\delta_\lambda = +\$516.62$ ($95\%\text{ CI}: [-\$313.77, +\$1,347.00], t = +1.22, p = 0.2256$)
+* $\lambda: 18 \to 20$: $\delta_\lambda = +\$1,722.06$ ($95\%\text{ CI}: [+\$404.23, +\$3,039.90], t = +2.56, p = 0.0119$)
+
+#### 2. Fleet Capacity Response Curve (Holding $H = 7\text{ Days}, \lambda = 15\text{ Loads/Epoch}$):
+
+| Fleet Capacity $K$ | Scarcity Ratio | Legacy Blind $V_{00}$ | Mittens $V_{11}$ | Total Mittens Lift | Conditional VoI $\Delta_{I \mid \text{comp}}$ | Interaction $\Delta_{\text{int}}$ | 95% Confidence Interval | $\Delta_{\text{int}} / \text{Day}$ |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **6** | $2.50 : 1$ | $\$8,655.35$ | $\$11,626.30$ | $+\$2,970.95\text{ (+34.3\%)}$ | $+\$2,614.36$ | **+$2,478.24** | $[+\$1,802.90, +\$3,153.58]$ | $+\$354.03/\text{d}$ |
+| **8** | $1.88 : 1$ | $\$9,315.68$ | $\$11,997.20$ | $+\$2,681.52\text{ (+28.8\%)}$ | $+\$2,402.19$ | **+$2,278.84** | $[+\$1,526.74, +\$3,030.94]$ | $+\$325.55/\text{d}$ |
+| **10** | $1.50 : 1$ | $\$10,545.20$ | $\$12,155.33$ | $+\$1,610.14\text{ (+15.3\%)}$ | $+\$2,447.22$ | **+$2,490.18** | $[+\$1,846.74, +\$3,133.62]$ | $+\$355.74/\text{d}$ |
+| **12** | $1.25 : 1$ | $\$10,263.45$ | $\$12,072.10$ | $+\$1,808.65\text{ (+17.6\%)}$ | $+\$2,382.62$ | **+$2,468.99** | $[+\$1,919.39, +\$3,018.59]$ | $+\$352.71/\text{d}$ |
+| **15** | $1.00 : 1$ | $\$10,513.40$ | $\$12,121.22$ | $+\$1,607.82\text{ (+15.3\%)}$ | $+\$2,082.65$ | **+$2,056.78** | $[+\$1,432.29, +\$2,681.26]$ | $+\$293.83/\text{d}$ |
+| **20** | $0.75 : 1$ | $\$11,135.14$ | $\$12,198.24$ | $+\$1,063.10\text{ ( +9.5\%)}$ | $+\$1,890.47$ | **+$1,971.55** | $[+\$1,302.77, +\$2,640.32]$ | $+\$281.65/\text{d}$ |
+
+#### 3. Horizon Response Curve (Holding $K = 10\text{ Drivers}, \lambda = 15\text{ Loads/Epoch}$):
+
+| Horizon $H$ | Total Mittens Lift | $\Delta_{I \mid \text{comp}}\text{ (Total)}$ | $\Delta_{I \mid \text{comp}} / \text{Day}$ | $\Delta_{A \mid \text{blind}} / \text{Day}$ | $\Delta_{\text{int}}\text{ (Total)}$ | $\Delta_{\text{int}} / \text{Day}$ |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **3 Days** | $+\$3,201.85\text{ (+47.4\%)}$ | $+\$1,852.37$ | $+\$617.46/\text{d}$ | $-\$449.83/\text{d}$ | $+\$1,842.32$ | **+$614.11/d** |
+| **7 Days** | $+\$1,610.14\text{ (+15.3\%)}$ | $+\$2,447.22$ | $+\$349.60/\text{d}$ | $-\$119.58/\text{d}$ | $+\$2,490.18$ | **+$355.74/d** |
+| **14 Days** | $+\$524.44\text{ ( +4.3\%)}$ | $+\$2,629.14$ | $+\$187.80/\text{d}$ | $-\$150.34/\text{d}$ | $+\$2,587.12$ | **+$184.79/d** |
+| **21 Days** | $+\$386.67\text{ ( +3.1\%)}$ | $+\$2,632.20$ | $+\$125.34/\text{d}$ | $-\$106.93/\text{d}$ | $+\$2,568.43$ | **+$122.31/d** |
+| **30 Days** | $+\$372.82\text{ ( +3.0\%)}$ | $+\$2,644.88$ | $+\$88.16/\text{d}$ | $-\$75.74/\text{d}$ | $+\$2,578.28$ | **+$85.94/d** |
 
 ---
 

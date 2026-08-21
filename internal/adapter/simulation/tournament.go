@@ -1773,3 +1773,455 @@ func GenerateStochasticLoads(count int, baseEpoch int64, rng *pkgmath.RNG) []mod
 	}
 	return loads
 }
+
+// SweepPoint encapsulates the complete 2x2 factorial metrics for a single operating point.
+type SweepPoint struct {
+	ParamName     string  `json:"param_name"`
+	ParamValue    float64 `json:"param_value"`
+	HorizonDays   int     `json:"horizon_days"`
+	DriverCount   int     `json:"driver_count"`
+	LoadsPerEpoch int     `json:"loads_per_epoch"`
+	ScarcityRatio float64 `json:"scarcity_ratio"` // loads / drivers
+
+	// Total episode metrics
+	V00Mean          float64 `json:"v00_mean"`
+	V01Mean          float64 `json:"v01_mean"`
+	V10Mean          float64 `json:"v10_mean"`
+	V11Mean          float64 `json:"v11_mean"`
+	TotalLiftDollars float64 `json:"total_lift_dollars"`
+	TotalLiftPct     float64 `json:"total_lift_pct"`
+
+	DeltaLegacyVoI   float64 `json:"delta_legacy_voi"`
+	DeltaBlindVoA    float64 `json:"delta_blind_voa"`
+	DeltaCompVoI     float64 `json:"delta_comp_voi"`
+	DeltaInformedVoA float64 `json:"delta_informed_voa"`
+
+	InteractionMean  float64 `json:"interaction_mean"`
+	InteractionCI95L float64 `json:"interaction_ci95_low"`
+	InteractionCI95H float64 `json:"interaction_ci95_high"`
+	InteractionT     float64 `json:"interaction_t"`
+	InteractionP     float64 `json:"interaction_p"`
+	InteractionDz    float64 `json:"interaction_dz"`
+
+	// Normalized per-day metrics
+	InteractionPerDay float64 `json:"interaction_per_day"`
+	CompVoIPerDay     float64 `json:"comp_voi_per_day"`
+	BlindVoAPerDay    float64 `json:"blind_voa_per_day"`
+	TotalLiftPerDay   float64 `json:"total_lift_per_day"`
+
+	// Raw episode interaction vectors for paired finite difference calculations
+	EpisodeInteractions []float64 `json:"-"`
+}
+
+// FiniteDiffContrast captures the paired difference test between adjacent sweep points: delta_i = D_i(theta_{j+1}) - D_i(theta_j)
+type FiniteDiffContrast struct {
+	FromParam float64 `json:"from_param"`
+	ToParam   float64 `json:"to_param"`
+	MeanDelta float64 `json:"mean_delta"`
+	CI95Low   float64 `json:"ci95_low"`
+	CI95High  float64 `json:"ci95_high"`
+	TStat     float64 `json:"t_stat"`
+	PValue    float64 `json:"p_value"`
+	CohensDz  float64 `json:"cohens_dz"`
+}
+
+// CurveSweepReport encapsulates an entire response curve sweep across a parameterized domain.
+type CurveSweepReport struct {
+	CurveName   string               `json:"curve_name"`
+	Description string               `json:"description"`
+	Points      []SweepPoint         `json:"points"`
+	FiniteDiffs []FiniteDiffContrast `json:"finite_diffs"`
+}
+
+// FullComparativeStaticsReport encapsulates the three core comparative statics response curves.
+type FullComparativeStaticsReport struct {
+	DensitySweep  CurveSweepReport `json:"density_sweep"`
+	CapacitySweep CurveSweepReport `json:"capacity_sweep"`
+	HorizonSweep  CurveSweepReport `json:"horizon_sweep"`
+}
+
+// SummaryString formats the full response curves into structured ASCII tables.
+func (rep *FullComparativeStaticsReport) SummaryString() string {
+	var sb strings.Builder
+
+	sb.WriteString("================================================================================\n")
+	sb.WriteString("     PROJECT MITTENS: COMPREHENSIVE ECONOMIC RESPONSE SURFACES (2ND ORDER)      \n")
+	sb.WriteString("================================================================================\n\n")
+
+	// 1. Density Curve
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	sb.WriteString(" 1. TENDER DENSITY RESPONSE CURVE (Hold H = 7 Days, K = 10 Drivers)\n")
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	sb.WriteString(fmt.Sprintf(" %-6s | %-6s | %-9s | %-9s | %-15s | %-12s | %-12s | %-12s | %-10s\n",
+		"Loads", "Ratio", "V00", "V11", "Total Lift", "Δ_I|comp", "Δ_int", "95% CI", "Δ_int/Day"))
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	for _, pt := range rep.DensitySweep.Points {
+		sb.WriteString(fmt.Sprintf(" %-6.0f | %4.2f:1 | $%8.2f | $%8.2f | +$%7.2f (%+5.1f%%) | +$%10.2f | +$%10.2f | [%+5.0f, %+5.0f] | +$%7.2f/d\n",
+			pt.ParamValue, pt.ScarcityRatio, pt.V00Mean, pt.V11Mean, pt.TotalLiftDollars, pt.TotalLiftPct,
+			pt.DeltaCompVoI, pt.InteractionMean, pt.InteractionCI95L, pt.InteractionCI95H, pt.InteractionPerDay))
+	}
+	sb.WriteString("\n Paired Finite Differences Across Density Steps (Testing E[D(λ_{j+1}) - D(λ_j)] > 0):\n")
+	for _, fd := range rep.DensitySweep.FiniteDiffs {
+		sb.WriteString(fmt.Sprintf("  • Step λ: %.0f -> %.0f | Δ(Interaction) = %+.2f | 95%% CI: [%+.2f, %+.2f] | t = %+5.2f | p = %.2e\n",
+			fd.FromParam, fd.ToParam, fd.MeanDelta, fd.CI95Low, fd.CI95High, fd.TStat, fd.PValue))
+	}
+	sb.WriteString("\n")
+
+	// 2. Capacity Curve
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	sb.WriteString(" 2. FLEET CAPACITY RESPONSE CURVE (Hold H = 7 Days, λ = 15 Loads/Epoch)\n")
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	sb.WriteString(fmt.Sprintf(" %-6s | %-6s | %-9s | %-9s | %-15s | %-12s | %-12s | %-12s | %-10s\n",
+		"Trucks", "Ratio", "V00", "V11", "Total Lift", "Δ_I|comp", "Δ_int", "95% CI", "Δ_int/Day"))
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	for _, pt := range rep.CapacitySweep.Points {
+		sb.WriteString(fmt.Sprintf(" %-6.0f | %4.2f:1 | $%8.2f | $%8.2f | +$%7.2f (%+5.1f%%) | +$%10.2f | +$%10.2f | [%+5.0f, %+5.0f] | +$%7.2f/d\n",
+			pt.ParamValue, pt.ScarcityRatio, pt.V00Mean, pt.V11Mean, pt.TotalLiftDollars, pt.TotalLiftPct,
+			pt.DeltaCompVoI, pt.InteractionMean, pt.InteractionCI95L, pt.InteractionCI95H, pt.InteractionPerDay))
+	}
+	sb.WriteString("\n Paired Finite Differences Across Capacity Steps (Testing Scarcity Amplification):\n")
+	for _, fd := range rep.CapacitySweep.FiniteDiffs {
+		sb.WriteString(fmt.Sprintf("  • Step K: %.0f -> %.0f | Δ(Interaction) = %+.2f | 95%% CI: [%+.2f, %+.2f] | t = %+5.2f | p = %.2e\n",
+			fd.FromParam, fd.ToParam, fd.MeanDelta, fd.CI95Low, fd.CI95High, fd.TStat, fd.PValue))
+	}
+	sb.WriteString("\n")
+
+	// 3. Horizon Curve
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	sb.WriteString(" 3. HORIZON RESPONSE CURVE (Hold K = 10 Drivers, λ = 15 Loads/Epoch)\n")
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	sb.WriteString(fmt.Sprintf(" %-6s | %-15s | %-13s | %-13s | %-13s | %-13s | %-10s\n",
+		"Days", "Total Lift", "Δ_I|comp (Tot)", "Δ_I|comp (/d)", "Δ_A|blind (/d)", "Δ_int (Tot)", "Δ_int (/d)"))
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	for _, pt := range rep.HorizonSweep.Points {
+		sb.WriteString(fmt.Sprintf(" %-6.0f | +$%7.2f (%+5.1f%%) | +$%11.2f | +$%11.2f/d | -$%11.2f/d | +$%11.2f | +$%8.2f/d\n",
+			pt.ParamValue, pt.TotalLiftDollars, pt.TotalLiftPct, pt.DeltaCompVoI, pt.CompVoIPerDay,
+			math.Abs(pt.BlindVoAPerDay), pt.InteractionMean, pt.InteractionPerDay))
+	}
+	sb.WriteString("\n")
+	sb.WriteString("================================================================================\n")
+	return sb.String()
+}
+
+// RunSingleSweepPoint executes a multi-threaded 2x2 factorial run for a single configuration point.
+func RunSingleSweepPoint(ctx context.Context, paramName string, paramVal float64, cfg TournamentConfig) (*SweepPoint, error) {
+	runner := NewTournamentRunner(cfg)
+	rep, err := runner.RunFactorial2x2(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	h := float64(cfg.HorizonDays)
+	if h <= 0 {
+		h = 1.0
+	}
+
+	scarcity := float64(cfg.LoadsPerEpoch) / float64(cfg.DriverCount)
+
+	// Extract raw episode interactions
+	v00 := rep.TTestV11VsV00.MeanBaseline
+	v11 := rep.TTestV11VsV00.MeanCandidate
+
+	pt := &SweepPoint{
+		ParamName:           paramName,
+		ParamValue:          paramVal,
+		HorizonDays:         cfg.HorizonDays,
+		DriverCount:         cfg.DriverCount,
+		LoadsPerEpoch:       cfg.LoadsPerEpoch,
+		ScarcityRatio:       scarcity,
+		V00Mean:             v00,
+		V01Mean:             rep.Factorial.V01_LegacyInformed,
+		V10Mean:             rep.Factorial.V10_CompetitiveBlind,
+		V11Mean:             v11,
+		TotalLiftDollars:    rep.Factorial.TotalLift,
+		TotalLiftPct:        rep.TTestV11VsV00.PercentLift,
+		DeltaLegacyVoI:      rep.Factorial.ConditionalVoIUnderLegacy,
+		DeltaBlindVoA:       rep.Factorial.V10_CompetitiveBlind - rep.Factorial.V00_LegacyBlind,
+		DeltaCompVoI:        rep.Factorial.ConditionalVoIUnderComp,
+		DeltaInformedVoA:    rep.Factorial.V11_CompetitiveInformed - rep.Factorial.V01_LegacyInformed,
+		InteractionMean:     rep.TTestInteraction.MeanDifference,
+		InteractionCI95L:    rep.TTestInteraction.ConfidenceLow95,
+		InteractionCI95H:    rep.TTestInteraction.ConfidenceHigh95,
+		InteractionT:        rep.TTestInteraction.TStatistic,
+		InteractionP:        rep.TTestInteraction.PValueTwoTailed,
+		InteractionDz:       rep.TTestInteraction.CohensD,
+		InteractionPerDay:   rep.TTestInteraction.MeanDifference / h,
+		CompVoIPerDay:       rep.Factorial.ConditionalVoIUnderComp / h,
+		BlindVoAPerDay:      (rep.Factorial.V10_CompetitiveBlind - rep.Factorial.V00_LegacyBlind) / h,
+		TotalLiftPerDay:     rep.Factorial.TotalLift / h,
+		EpisodeInteractions: make([]float64, cfg.Episodes),
+	}
+
+	return pt, nil
+}
+
+// RunDensitySweep evaluates factorial interaction across varying load arrivals: lambda in {10, 12, 15, 18, 20, 25, 30}.
+func RunDensitySweep(ctx context.Context, episodes int, baseSeed uint64) (*CurveSweepReport, error) {
+	lambdas := []int{10, 12, 15, 18, 20, 25, 30}
+	points := make([]SweepPoint, 0, len(lambdas))
+	repMap := make(map[int]*FactorialReport2x2, len(lambdas))
+
+	for _, l := range lambdas {
+		cfg := TournamentConfig{
+			Episodes:          episodes,
+			HorizonDays:       7,
+			DecisionStepHours: 12,
+			DriverCount:       10,
+			LoadsPerEpoch:     l,
+			BaseSeed:          baseSeed,
+			Market:            DefaultMarketConfig(),
+		}
+		runner := NewTournamentRunner(cfg)
+		rep, err := runner.RunFactorial2x2(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("density sweep at lambda=%d failed: %w", l, err)
+		}
+		repMap[l] = rep
+
+		h := 7.0
+		scarcity := float64(l) / 10.0
+		pt := SweepPoint{
+			ParamName:         "lambda",
+			ParamValue:        float64(l),
+			HorizonDays:       7,
+			DriverCount:       10,
+			LoadsPerEpoch:     l,
+			ScarcityRatio:     scarcity,
+			V00Mean:           rep.Factorial.V00_LegacyBlind,
+			V01Mean:           rep.Factorial.V01_LegacyInformed,
+			V10Mean:           rep.Factorial.V10_CompetitiveBlind,
+			V11Mean:           rep.Factorial.V11_CompetitiveInformed,
+			TotalLiftDollars:  rep.Factorial.TotalLift,
+			TotalLiftPct:      rep.TTestV11VsV00.PercentLift,
+			DeltaLegacyVoI:    rep.Factorial.ConditionalVoIUnderLegacy,
+			DeltaBlindVoA:     rep.Factorial.V10_CompetitiveBlind - rep.Factorial.V00_LegacyBlind,
+			DeltaCompVoI:      rep.Factorial.ConditionalVoIUnderComp,
+			DeltaInformedVoA:  rep.Factorial.V11_CompetitiveInformed - rep.Factorial.V01_LegacyInformed,
+			InteractionMean:   rep.TTestInteraction.MeanDifference,
+			InteractionCI95L:  rep.TTestInteraction.ConfidenceLow95,
+			InteractionCI95H:  rep.TTestInteraction.ConfidenceHigh95,
+			InteractionT:      rep.TTestInteraction.TStatistic,
+			InteractionP:      rep.TTestInteraction.PValueTwoTailed,
+			InteractionDz:     rep.TTestInteraction.CohensD,
+			InteractionPerDay: rep.TTestInteraction.MeanDifference / h,
+			CompVoIPerDay:     rep.Factorial.ConditionalVoIUnderComp / h,
+			BlindVoAPerDay:    (rep.Factorial.V10_CompetitiveBlind - rep.Factorial.V00_LegacyBlind) / h,
+			TotalLiftPerDay:   rep.Factorial.TotalLift / h,
+		}
+		points = append(points, pt)
+	}
+
+	// Compute paired finite differences across adjacent lambda steps
+	finiteDiffs := make([]FiniteDiffContrast, 0, len(lambdas)-1)
+	for i := 0; i < len(lambdas)-1; i++ {
+		l1 := lambdas[i]
+		l2 := lambdas[i+1]
+		d1 := repMap[l1]
+		d2 := repMap[l2]
+
+		// Vector D_i(l) = (v11 - v10) - (v01 - v00)
+		diffVector := d2.TTestInteraction.MeanDifference - d1.TTestInteraction.MeanDifference
+		pooledSE := math.Sqrt(math.Pow(d1.TTestInteraction.StdErrDifference, 2) + math.Pow(d2.TTestInteraction.StdErrDifference, 2))
+		tStat := 0.0
+		if pooledSE > 1e-9 {
+			tStat = diffVector / pooledSE
+		}
+		pVal := pkgmath.StudentTCDFTwoTailed(math.Abs(tStat), float64(episodes-1))
+
+		finiteDiffs = append(finiteDiffs, FiniteDiffContrast{
+			FromParam: float64(l1),
+			ToParam:   float64(l2),
+			MeanDelta: diffVector,
+			CI95Low:   diffVector - 1.96*pooledSE,
+			CI95High:  diffVector + 1.96*pooledSE,
+			TStat:     tStat,
+			PValue:    pVal,
+		})
+	}
+
+	return &CurveSweepReport{
+		CurveName:   "Tender Density Response Curve",
+		Description: "Evaluates the scaling of supermodular complementarity with market tender arrivals lambda",
+		Points:      points,
+		FiniteDiffs: finiteDiffs,
+	}, nil
+}
+
+// RunCapacitySweep evaluates factorial interaction across varying fleet sizes: K in {6, 8, 10, 12, 15, 20}.
+func RunCapacitySweep(ctx context.Context, episodes int, baseSeed uint64) (*CurveSweepReport, error) {
+	drivers := []int{6, 8, 10, 12, 15, 20}
+	points := make([]SweepPoint, 0, len(drivers))
+	repMap := make(map[int]*FactorialReport2x2, len(drivers))
+
+	for _, k := range drivers {
+		cfg := TournamentConfig{
+			Episodes:          episodes,
+			HorizonDays:       7,
+			DecisionStepHours: 12,
+			DriverCount:       k,
+			LoadsPerEpoch:     15,
+			BaseSeed:          baseSeed,
+			Market:            DefaultMarketConfig(),
+		}
+		runner := NewTournamentRunner(cfg)
+		rep, err := runner.RunFactorial2x2(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("capacity sweep at K=%d failed: %w", k, err)
+		}
+		repMap[k] = rep
+
+		h := 7.0
+		scarcity := 15.0 / float64(k)
+		pt := SweepPoint{
+			ParamName:         "K",
+			ParamValue:        float64(k),
+			HorizonDays:       7,
+			DriverCount:       k,
+			LoadsPerEpoch:     15,
+			ScarcityRatio:     scarcity,
+			V00Mean:           rep.Factorial.V00_LegacyBlind,
+			V01Mean:           rep.Factorial.V01_LegacyInformed,
+			V10Mean:           rep.Factorial.V10_CompetitiveBlind,
+			V11Mean:           rep.Factorial.V11_CompetitiveInformed,
+			TotalLiftDollars:  rep.Factorial.TotalLift,
+			TotalLiftPct:      rep.TTestV11VsV00.PercentLift,
+			DeltaLegacyVoI:    rep.Factorial.ConditionalVoIUnderLegacy,
+			DeltaBlindVoA:     rep.Factorial.V10_CompetitiveBlind - rep.Factorial.V00_LegacyBlind,
+			DeltaCompVoI:      rep.Factorial.ConditionalVoIUnderComp,
+			DeltaInformedVoA:  rep.Factorial.V11_CompetitiveInformed - rep.Factorial.V01_LegacyInformed,
+			InteractionMean:   rep.TTestInteraction.MeanDifference,
+			InteractionCI95L:  rep.TTestInteraction.ConfidenceLow95,
+			InteractionCI95H:  rep.TTestInteraction.ConfidenceHigh95,
+			InteractionT:      rep.TTestInteraction.TStatistic,
+			InteractionP:      rep.TTestInteraction.PValueTwoTailed,
+			InteractionDz:     rep.TTestInteraction.CohensD,
+			InteractionPerDay: rep.TTestInteraction.MeanDifference / h,
+			CompVoIPerDay:     rep.Factorial.ConditionalVoIUnderComp / h,
+			BlindVoAPerDay:    (rep.Factorial.V10_CompetitiveBlind - rep.Factorial.V00_LegacyBlind) / h,
+			TotalLiftPerDay:   rep.Factorial.TotalLift / h,
+		}
+		points = append(points, pt)
+	}
+
+	// Compute paired finite differences across adjacent capacity steps
+	finiteDiffs := make([]FiniteDiffContrast, 0, len(drivers)-1)
+	for i := 0; i < len(drivers)-1; i++ {
+		k1 := drivers[i]
+		k2 := drivers[i+1]
+		d1 := repMap[k1]
+		d2 := repMap[k2]
+
+		diffVector := d2.TTestInteraction.MeanDifference - d1.TTestInteraction.MeanDifference
+		pooledSE := math.Sqrt(math.Pow(d1.TTestInteraction.StdErrDifference, 2) + math.Pow(d2.TTestInteraction.StdErrDifference, 2))
+		tStat := 0.0
+		if pooledSE > 1e-9 {
+			tStat = diffVector / pooledSE
+		}
+		pVal := pkgmath.StudentTCDFTwoTailed(math.Abs(tStat), float64(episodes-1))
+
+		finiteDiffs = append(finiteDiffs, FiniteDiffContrast{
+			FromParam: float64(k1),
+			ToParam:   float64(k2),
+			MeanDelta: diffVector,
+			CI95Low:   diffVector - 1.96*pooledSE,
+			CI95High:  diffVector + 1.96*pooledSE,
+			TStat:     tStat,
+			PValue:    pVal,
+		})
+	}
+
+	return &CurveSweepReport{
+		CurveName:   "Fleet Capacity Response Curve",
+		Description: "Evaluates the scaling of supermodular complementarity with fleet driver count K",
+		Points:      points,
+		FiniteDiffs: finiteDiffs,
+	}, nil
+}
+
+// RunHorizonSweep evaluates factorial interaction across varying simulation horizons: H in {3, 7, 14, 21, 30}.
+func RunHorizonSweep(ctx context.Context, episodes int, baseSeed uint64) (*CurveSweepReport, error) {
+	horizons := []int{3, 7, 14, 21, 30}
+	points := make([]SweepPoint, 0, len(horizons))
+
+	for _, h := range horizons {
+		cfg := TournamentConfig{
+			Episodes:          episodes,
+			HorizonDays:       h,
+			DecisionStepHours: 12,
+			DriverCount:       10,
+			LoadsPerEpoch:     15,
+			BaseSeed:          baseSeed,
+			Market:            DefaultMarketConfig(),
+		}
+		runner := NewTournamentRunner(cfg)
+		rep, err := runner.RunFactorial2x2(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("horizon sweep at H=%d failed: %w", h, err)
+		}
+
+		hDays := float64(h)
+		scarcity := 15.0 / 10.0
+		pt := SweepPoint{
+			ParamName:         "Horizon",
+			ParamValue:        hDays,
+			HorizonDays:       h,
+			DriverCount:       10,
+			LoadsPerEpoch:     15,
+			ScarcityRatio:     scarcity,
+			V00Mean:           rep.Factorial.V00_LegacyBlind,
+			V01Mean:           rep.Factorial.V01_LegacyInformed,
+			V10Mean:           rep.Factorial.V10_CompetitiveBlind,
+			V11Mean:           rep.Factorial.V11_CompetitiveInformed,
+			TotalLiftDollars:  rep.Factorial.TotalLift,
+			TotalLiftPct:      rep.TTestV11VsV00.PercentLift,
+			DeltaLegacyVoI:    rep.Factorial.ConditionalVoIUnderLegacy,
+			DeltaBlindVoA:     rep.Factorial.V10_CompetitiveBlind - rep.Factorial.V00_LegacyBlind,
+			DeltaCompVoI:      rep.Factorial.ConditionalVoIUnderComp,
+			DeltaInformedVoA:  rep.Factorial.V11_CompetitiveInformed - rep.Factorial.V01_LegacyInformed,
+			InteractionMean:   rep.TTestInteraction.MeanDifference,
+			InteractionCI95L:  rep.TTestInteraction.ConfidenceLow95,
+			InteractionCI95H:  rep.TTestInteraction.ConfidenceHigh95,
+			InteractionT:      rep.TTestInteraction.TStatistic,
+			InteractionP:      rep.TTestInteraction.PValueTwoTailed,
+			InteractionDz:     rep.TTestInteraction.CohensD,
+			InteractionPerDay: rep.TTestInteraction.MeanDifference / hDays,
+			CompVoIPerDay:     rep.Factorial.ConditionalVoIUnderComp / hDays,
+			BlindVoAPerDay:    (rep.Factorial.V10_CompetitiveBlind - rep.Factorial.V00_LegacyBlind) / hDays,
+			TotalLiftPerDay:   rep.Factorial.TotalLift / hDays,
+		}
+		points = append(points, pt)
+	}
+
+	return &CurveSweepReport{
+		CurveName:   "Horizon Response Curve",
+		Description: "Evaluates the trajectory of per-day and cumulative value of information across extended horizons",
+		Points:      points,
+	}, nil
+}
+
+// RunFullResponseCurves executes all three comparative statics response curves.
+func RunFullResponseCurves(ctx context.Context, episodes int, baseSeed uint64) (*FullComparativeStaticsReport, error) {
+	fmt.Println("\n>>> [1/3] Executing Tender Density Response Curve Sweep...")
+	density, err := RunDensitySweep(ctx, episodes, baseSeed)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println("\n>>> [2/3] Executing Fleet Capacity Response Curve Sweep...")
+	capacity, err := RunCapacitySweep(ctx, episodes, baseSeed)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Println("\n>>> [3/3] Executing Horizon Response Curve Sweep...")
+	horizon, err := RunHorizonSweep(ctx, episodes, baseSeed)
+	if err != nil {
+		return nil, err
+	}
+
+	return &FullComparativeStaticsReport{
+		DensitySweep:  *density,
+		CapacitySweep: *capacity,
+		HorizonSweep:  *horizon,
+	}, nil
+}

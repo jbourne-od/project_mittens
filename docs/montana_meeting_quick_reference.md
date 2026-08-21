@@ -25,16 +25,23 @@ From the repository root (`/Users/jacob/Development/od/project_mittens`):
 ./bin/tournament -mode 4way -episodes 10 -days 5
 ```
 * **What it shows:** Side-by-side scorecard of all 4 policy classes plus the competitive POMDP.
-* **Key Talking Point:** Point out how PFA evaluates in $0.06\text{ ms}$ (pure greedy rule), CFA/VFA solve in $0.5\text{ ms}$ via Jonker-Volgenant / MCNF, DLA runs forward Monte Carlo rollouts in $100\text{ ms}$, and the Competitive POMDP delivers $+136\%$ net contribution lift by jointly optimizing dispatch and spot bidding.
+* **Key Talking Point:** Point out how PFA evaluates in $0.06\text{ ms}$ (pure greedy rule), CFA/VFA solve in $0.5\text{ ms}$ via Jonker-Volgenant / MCNF, DLA runs forward Monte Carlo rollouts in $100\text{ ms}$, and the Competitive POMDP delivers substantial net contribution lift by jointly optimizing dispatch and spot bidding.
 
-### Demo 2: The $2 \times 2$ Factorial Option Value & Value of Information
+### Demo 2: The $2 \times 2$ Factorial Option Value & Value of Information ($N = 1,000$ Baseline)
 ```bash
-./bin/tournament -mode factorial
+./bin/tournament -mode factorial -episodes 50
 ```
 * **What it shows:** Full $2 \times 2$ matrix isolating **pricing flexibility** ($\mathcal{P}^{\text{fixed}}$ vs $\mathcal{P}^{\text{flex}}$) and **market intelligence** ($b_0$ vs $b_t$).
-* **Key Talking Point:** Point out the supermodular interaction ($\Delta_{\text{int}} = +\$3,719.52$, $p < 10^{-4}$)—market intelligence has immense economic value *precisely because* the carrier possesses the pricing lever to monetize it.
+* **Key Talking Point:** Point out the supermodular interaction ($\Delta_{\text{int}} = +\$2,184.40$, $t = +18.29, p = 3.24 \times 10^{-64}$)—market intelligence has immense economic value *precisely because* the carrier possesses the pricing lever to monetize it. Under the legacy policy, standalone information effect is essentially zero ($-\$8.51$, $p = 0.763$, $84.3\%$ exact ties).
 
-### Demo 3: Monopolistic Reduction vs. Competitive Superiority
+### Demo 3: Second-Order Response Surfaces & Scarcity Sweeps
+```bash
+./bin/tournament -mode curves -episodes 50
+```
+* **What it shows:** Continuous sweeps across **Tender Flow** ($\lambda \in [10, 30]$), **Fleet Capacity** ($K \in [6, 20]$), and **Horizon** ($H \in [3, 30]$ days) with paired finite differences.
+* **Key Talking Point:** Point out **Empirical Proposition 4**: Complementarity amplifies under high tender density (interaction jumps to $+\$4,054$ and lift reaches $+28.1\%$ at $2.5 : 1$ load-to-truck ratio), while horizon rollouts reveal per-day information attenuation ($\$311/\text{day} \to \$81/\text{day}$) against constant blind mispricing bleeding ($-\$72/\text{day}$).
+
+### Demo 4: Monopolistic Reduction vs. Competitive Superiority
 ```bash
 ./bin/tournament -mode pairwise
 ```

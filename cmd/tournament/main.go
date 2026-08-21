@@ -133,6 +133,15 @@ func main() {
 		fmt.Println("================================================================================")
 		exportData = rep
 
+	case "curves", "sweep":
+		curves, err := simulation.RunFullResponseCurves(ctx, *episodes, *baseSeed)
+		if err != nil {
+			slog.Error("Response curves sweep failed", "error", err)
+			os.Exit(1)
+		}
+		fmt.Print("\n" + curves.SummaryString())
+		exportData = curves
+
 	default: // pairwise N0 vs N1
 		report, err := runner.Run(ctx)
 		if err != nil {

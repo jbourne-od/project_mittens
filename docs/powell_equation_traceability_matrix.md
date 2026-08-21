@@ -22,7 +22,7 @@
 
 | Powell (2022) Equation | Canonical SDA Formulation | Project Mittens Domain Instantiation | Repository Go Type & Method | File Location |
 | :--- | :--- | :--- | :--- | :--- |
-| **Eq. (12.1)** | $X^{\text{PFA}}(S_t \mid \theta) = f_\theta(S_t)$ | Analytical Greedy Priority Dispatch Rule (No LAP solver) | `policy.PFAPolicy[C]`<br>`PFAPolicy.Evaluate()` | [`internal/domain/policy/pfa.go`](file:///Users/jacob/Development/od/project_mittens/internal/domain/policy/pfa.go) |
+| **Eq. (12.1)** | $X^{\text{PFA}}(S_t \mid \theta) = f_\theta(S_t)$ | Constructive Greedy Priority Dispatch Rule (No embedded LAP) | `policy.PFAPolicy[C]`<br>`PFAPolicy.Evaluate()` | [`internal/domain/policy/pfa.go`](file:///Users/jacob/Development/od/project_mittens/internal/domain/policy/pfa.go) |
 | **Eq. (12.3)** | $\theta = (\theta_1, \dots, \theta_P)$ | $\theta = (\text{MaxDeadhead}, \text{DeadheadWeight}, \text{DwellWeight}, \text{RevWeight})$ | `policy.PFAParameters`<br>`DefaultPFAParameters()` | [`internal/domain/policy/pfa.go`](file:///Users/jacob/Development/od/project_mittens/internal/domain/policy/pfa.go) |
 
 ---
@@ -83,6 +83,6 @@ go run ./cmd/tournament/main.go -mode 4way -episodes 15 -days 7
 # 2. Run 2x2 factorial decomposition (V00, V01, V10, V11)
 go run ./cmd/tournament/main.go -mode factorial -episodes 25 -days 7
 
-# 3. Verify zero race conditions across mathematical and policy packages
+# 3. Verify concurrent safety (the Go race detector reported no data races on the executed test suite)
 go test -race -short ./pkg/math/... ./internal/domain/policy/... ./internal/service/...
 ```

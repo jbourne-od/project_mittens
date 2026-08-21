@@ -24,6 +24,13 @@ from .models import (
     RepositionMoveDTO,
     RepositionPlanResponse,
 )
+from .shadow import (
+    ShadowMatch,
+    ShadowDiffReport,
+    ShadowDiffEngine,
+    RollingShadowScorecard,
+    ShadowProxy,
+)
 from .exceptions import (
     MittensError,
     MittensAPIError,
@@ -34,6 +41,11 @@ from .exceptions import (
 __version__ = "1.0.0"
 __all__ = [
     "MittensClient",
+    "ShadowMatch",
+    "ShadowDiffReport",
+    "ShadowDiffEngine",
+    "RollingShadowScorecard",
+    "ShadowProxy",
     "LocationDTO",
     "EquipmentDTO",
     "DriverDTO",
@@ -56,3 +68,4 @@ __all__ = [
     "ReplayMismatchError",
     "ChainIntegrityError",
 ]
+

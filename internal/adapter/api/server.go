@@ -227,6 +227,22 @@ func (s *Server) Router() chi.Router {
 	return s.router
 }
 
+// Dependencies returns the active service dependencies for sharing with other adapters.
+func (s *Server) Dependencies() HandlerDependencies {
+	if s.handler == nil {
+		return HandlerDependencies{}
+	}
+	return HandlerDependencies{
+		Journal:         s.handler.journal,
+		CryptoStore:     s.handler.cryptoStore,
+		DBPool:          s.handler.dbPool,
+		RunRepository:   s.handler.runRepo,
+		StreamBuffer:    s.handler.streamBuffer,
+		StreamSync:      s.handler.streamSync,
+		RepositionSynth: s.handler.repositionSynth,
+	}
+}
+
 // Start launches the HTTP server synchronously.
 func (s *Server) Start() error {
 	return s.httpSrv.ListenAndServe()

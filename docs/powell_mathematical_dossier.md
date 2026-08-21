@@ -307,13 +307,13 @@ $$\Delta_{I \mid \text{comp}} - \Delta_{I \mid \text{legacy}} = \$2,175.89 - (-\
 ### 4.4 Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes)
 
 > **Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes):**  
-> *Competitive market information and pricing/dispatch flexibility exhibit positive treatment-lattice complementarity across all tested operating regimes. The magnitude of this complementarity is governed by market density, fleet capacity thickness, and time-to-filter convergence:*
-> $$\Delta_{\text{int}} = f\left(\underbrace{\frac{\lambda}{K}}_{\text{scarcity}}, \underbrace{\lambda, K}_{\text{market thickness}}, H\right)$$
+> *Competitive market information and pricing/dispatch flexibility exhibit positive treatment-lattice complementarity across all tested operating regimes. The magnitude of this complementarity is governed jointly by market density, absolute scale/thickness, and horizon duration:*
+> $$\Delta_{\text{int}} = f\left(\frac{\lambda}{K}, \lambda, K, H\right), \quad \Delta_{\text{int}} \ne f\left(\frac{\lambda}{K}\right) \text{ alone.}$$
 
 #### Evidence Hierarchy & Experimental Design:
 We organize our empirical findings into a two-tier research hierarchy:
 1. **Confirmatory High-Powered Experiments ($N = 500$ to $N = 1,000$ paired episodes):** Establish tightly estimated baseline benchmarks and primary regime contrasts.
-2. **Exploratory Continuous Response Surfaces ($N = 100$ paired episodes per grid cell, 18 parameter points):** Map the underlying functional topology across tender flow $\lambda \in [10, 30]$, fleet size $K \in [6, 20]$, and horizon $H \in [3, 30]$ days, testing paired stepwise finite differences $\delta_{\theta, i} = D_i(\theta_{j+1}) - D_i(\theta_j)$.
+2. **Exploratory Continuous Response Surfaces ($N = 100$ paired episodes per grid cell, 18 parameter points):** Map the underlying functional topology across tender flow $\lambda \in [10, 30]$, fleet size $K \in [6, 20]$, and horizon $H \in [3, 30]$ days, testing paired stepwise finite differences $\delta_{\theta, i} = D_i(\theta_{j+1}) - D_i(\theta_j)$ with exact Student-$t$ quantiles ($df = 99$).
 
 #### Confirmatory Grid Experiments ($N = 500$ to $N = 1,000$ Paired Episodes):
 
@@ -325,14 +325,16 @@ We organize our empirical findings into a two-tier research hierarchy:
 | **Baseline Benchmark ($N=1,000$)** | 7 Days | 10 | 15 | $1.5 : 1$ | **+$2,184.40** | $[+\$1,950.12, +\$2,418.68]$ | $+18.29$ | $3.24 \times 10^{-64}$ | **+16.44%** |
 
 #### Key Analytical Conclusions:
-1. **Market Thickness Independently Drives Option Value (Beyond Scarcity Ratio $\lambda/K$):**  
-   The response curves empirically reject the naive hypothesis that complementarity is purely a 1D function of the ratio $\lambda/K$.
-   * At identical scarcity ratio $2.5 : 1$: a thick market ($25\text{ loads}, 10\text{ trucks}$) yields $\Delta_{\text{int}} = +\$4,390.81$ (+$4,053.99$ at $N=500$), whereas a thin market ($15\text{ loads}, 6\text{ trucks}$) yields only $\Delta_{\text{int}} = +\$2,478.24$.
-   * At identical scarcity ratio $1.0 : 1$: a thin market ($10\text{ loads}, 10\text{ trucks}$) yields $\Delta_{\text{int}} = +\$1,311.72$, whereas a thick market ($15\text{ loads}, 15\text{ trucks}$) yields $\Delta_{\text{int}} = +\$2,056.78$ (+$2,010.79$ at $N=500$).
-   * *Economic rationale:* Market thickness provides more combinatorial assignment choices, multiplying the option value of possessing accurate competitor pricing intelligence.
+1. **Scarcity Ratio Is Not Sufficient; Evidence of a Market-Scale/Thickness Effect:**  
+   The response curves empirically refute the naive 1D hypothesis that complementarity depends solely on the ratio $\lambda/K$.
+   * At identical scarcity ratio $2.5 : 1$: an absolute scale of $(25\text{ loads}, 10\text{ trucks})$ yields $\Delta_{\text{int}} = +\$4,390.81$ (+$4,053.99$ at $N=500$), whereas $(15\text{ loads}, 6\text{ trucks})$ yields only $\Delta_{\text{int}} = +\$2,478.24$.
+   * At identical scarcity ratio $1.0 : 1$: an absolute scale of $(10\text{ loads}, 10\text{ trucks})$ yields $\Delta_{\text{int}} = +\$1,311.72$, whereas $(15\text{ loads}, 15\text{ trucks})$ yields $\Delta_{\text{int}} = +\$2,056.78$ (+$2,010.79$ at $N=500$).
+   * Absolute scale matters in addition to scarcity ratio. This is consistent with thicker markets offering richer combinatorial assignment options, expanding the option value of pricing flexibility and competitor intelligence. To isolate scale conditional on scarcity, future work will evaluate constant-ratio scale rays: $(5,5), (10,10), (15,15), (20,20)$ and $(5,2), (10,4), (15,6), (20,8), (25,10)$.
 2. **Transience and Saturation of Horizon Effects:**  
    Across extended horizons ($H = 3 \to 30$ days), cumulative blind mispricing damage ($\Delta_{A \mid \text{blind}} = -\$837 \to -\$2,105 \to -\$2,246 \to -\$2,272$) and cumulative informed value of information ($\Delta_{I \mid \text{comp}} = +\$2,447 \to +\$2,629 \to +\$2,632 \to +\$2,645$) both saturate after 14–21 days.  
-   *Economic rationale:* **Both the cost of initial mispricing and the marginal value of information are predominantly transient.** Once the Bayes filter converges to the stationary competitor posture and fleet allocations stabilize into steady-state cycles, incremental per-day information gains attenuate toward zero while cumulative advantage remains intact.
+   *Working Hypothesis:* The observed saturation is consistent with an initial learning/transient-allocation regime followed by a stationary filtering and dispatch regime in which incremental information rents are small. At short horizons ($H=3$ days), blind competitive pricing yields a short-run positive value of action before longer-horizon degradation emerges, while the informed policy extracts immediate gains. (Future telemetry logging epoch-by-epoch posterior entropy $H(b_t)$, calibration, policy action divergence, and driver spatial distributions will directly test this causal channel).
+3. **Exploratory Finite Differences & Scientific Humility:**  
+   Across the $N=100$ exploratory sweep with exact Student-$t$ intervals ($df=99, t_{\text{crit}} \approx 1.984$), only $\lambda: 18 \to 20$ reaches conventional statistical significance ($p = 0.0119$), while for capacity $K$, no adjacent step is distinguishable from zero. The interaction levels vary materially across operating regimes, with broad evidence of greater complementarity in denser markets, but $N=100$ exploratory finite differences are too noisy to establish a monotone local response. This reinforces our two-tier research hierarchy.
 
 ---
 
@@ -350,16 +352,16 @@ We organize our empirical findings into a two-tier research hierarchy:
 | **25** | $2.50 : 1$ | $\$16,699.15$ | $\$20,948.71$ | $+\$4,249.56\text{ (+25.4\%)}$ | $+\$4,444.63$ | **+$4,390.81** | $[+\$3,149.41, +\$5,632.21]$ | $+\$627.26/\text{d}$ |
 | **30** | $3.00 : 1$ | $\$17,334.76$ | $\$24,110.51$ | $+\$6,775.74\text{ (+39.1\%)}$ | $+\$4,138.21$ | **+$3,933.78** | $[+\$2,769.72, +\$5,097.85]$ | $+\$561.97/\text{d}$ |
 
-#### Paired Stepwise Finite Differences Across Density Steps ($\delta_{\lambda, i} = D_i(\lambda_{j+1}) - D_i(\lambda_j)$):
+#### Paired Stepwise Finite Differences Across Density Steps ($\delta_{\lambda, i} = D_i(\lambda_{j+1}) - D_i(\lambda_j)$, exact $df=99$ Student-$t$ CIs):
 
-| Transition | Mean $\Delta(\text{Interaction})$ | 95% Confidence Interval | $t$-Statistic | Two-Sided $p$-Value |
+| Transition | Mean $\Delta(\text{Interaction})$ | 95% Student-$t$ Confidence Interval | $t$-Statistic | Two-Sided $p$-Value |
 | :---: | :---: | :---: | :---: | :---: |
-| $\lambda: 10 \to 12$ | **+$661.84** | $[+\$2.89, +\$1,320.80]$ | $+1.97$ | $0.0518$ |
-| $\lambda: 12 \to 15$ | **+$516.62** | $[-\$313.77, +\$1,347.00]$ | $+1.22$ | $0.2256$ |
-| $\lambda: 15 \to 18$ | **-$508.82** | $[-\$1,639.32, +\$621.69]$ | $-0.88$ | $0.3798$ |
-| $\lambda: 18 \to 20$ | **+$1,722.06** | $[+\$404.23, +\$3,039.90]$ | $+2.56$ | **0.0119** |
-| $\lambda: 20 \to 25$ | **+$687.38** | $[-\$850.62, +\$2,225.39]$ | $+0.88$ | $0.3832$ |
-| $\lambda: 25 \to 30$ | **-$457.03** | $[-\$2,137.68, +\$1,223.63]$ | $-0.53$ | $0.5952$ |
+| $\lambda: 10 \to 12$ | **+$661.84** | $[-\$5.25, +\$1,328.94]$ | $+1.97$ | $0.0518$ |
+| $\lambda: 12 \to 15$ | **+$516.62** | $[-\$324.03, +\$1,357.26]$ | $+1.22$ | $0.2256$ |
+| $\lambda: 15 \to 18$ | **-$508.82** | $[-\$1,653.29, +\$635.66]$ | $-0.88$ | $0.3798$ |
+| $\lambda: 18 \to 20$ | **+$1,722.06** | $[+\$387.95, +\$3,056.18]$ | $+2.56$ | **0.0119** |
+| $\lambda: 20 \to 25$ | **+$687.38** | $[-\$869.62, +\$2,244.39]$ | $+0.88$ | $0.3832$ |
+| $\lambda: 25 \to 30$ | **-$457.03** | $[-\$2,158.45, +\$1,244.39]$ | $-0.53$ | $0.5952$ |
 
 ---
 
@@ -374,15 +376,15 @@ We organize our empirical findings into a two-tier research hierarchy:
 | **15** | $1.00 : 1$ | $\$10,513.40$ | $\$12,121.22$ | $+\$1,607.82\text{ (+15.3\%)}$ | $+\$2,082.65$ | **+$2,056.78** | $[+\$1,432.29, +\$2,681.26]$ | $+\$293.83/\text{d}$ |
 | **20** | $0.75 : 1$ | $\$11,135.14$ | $\$12,198.24$ | $+\$1,063.10\text{ ( +9.5\%)}$ | $+\$1,890.47$ | **+$1,971.55** | $[+\$1,302.77, +\$2,640.32]$ | $+\$281.65/\text{d}$ |
 
-#### Paired Stepwise Finite Differences Across Capacity Steps ($\delta_{K, i} = D_i(K_{j+1}) - D_i(K_j)$):
+#### Paired Stepwise Finite Differences Across Capacity Steps ($\delta_{K, i} = D_i(K_{j+1}) - D_i(K_j)$, exact $df=99$ Student-$t$ CIs):
 
-| Transition | Mean $\Delta(\text{Interaction})$ | 95% Confidence Interval | $t$-Statistic | Two-Sided $p$-Value |
+| Transition | Mean $\Delta(\text{Interaction})$ | 95% Student-$t$ Confidence Interval | $t$-Statistic | Two-Sided $p$-Value |
 | :---: | :---: | :---: | :---: | :---: |
-| $K: 6 \to 8$ | **-$199.40** | $[-\$1,197.65, +\$798.85]$ | $-0.39$ | $0.6963$ |
-| $K: 8 \to 10$ | **+$211.34** | $[-\$766.15, +\$1,188.82]$ | $+0.42$ | $0.6727$ |
-| $K: 10 \to 12$ | **-$21.18** | $[-\$856.88, +\$814.51]$ | $-0.05$ | $0.9605$ |
-| $K: 12 \to 15$ | **-$412.21** | $[-\$1,233.77, +\$409.34]$ | $-0.98$ | $0.3278$ |
-| $K: 15 \to 20$ | **-$85.23** | $[-\$988.87, +\$818.41]$ | $-0.18$ | $0.8537$ |
+| $K: 6 \to 8$ | **-$199.40** | $[-\$1,209.98, +\$811.19]$ | $-0.39$ | $0.6963$ |
+| $K: 8 \to 10$ | **+$211.34** | $[-\$778.22, +\$1,200.90]$ | $+0.42$ | $0.6727$ |
+| $K: 10 \to 12$ | **-$21.18** | $[-\$867.21, +\$824.84]$ | $-0.05$ | $0.9605$ |
+| $K: 12 \to 15$ | **-$412.21** | $[-\$1,243.92, +\$419.49]$ | $-0.98$ | $0.3278$ |
+| $K: 15 \to 20$ | **-$85.23** | $[-\$1,000.04, +\$829.57]$ | $-0.18$ | $0.8537$ |
 
 ---
 

@@ -2060,13 +2060,15 @@ func RunDensitySweep(ctx context.Context, episodes int, baseSeed uint64) (*Curve
 			tStat = diffVector / pooledSE
 		}
 		pVal := pkgmath.StudentTCDFTwoTailed(math.Abs(tStat), float64(episodes-1))
+		tCrit := pkgmath.StudentTCriticalValue(0.05, float64(episodes-1))
+		margin := tCrit * pooledSE
 
 		finiteDiffs = append(finiteDiffs, FiniteDiffContrast{
 			FromParam: float64(l1),
 			ToParam:   float64(l2),
 			MeanDelta: diffVector,
-			CI95Low:   diffVector - 1.96*pooledSE,
-			CI95High:  diffVector + 1.96*pooledSE,
+			CI95Low:   diffVector - margin,
+			CI95High:  diffVector + margin,
 			TStat:     tStat,
 			PValue:    pVal,
 		})
@@ -2151,13 +2153,15 @@ func RunCapacitySweep(ctx context.Context, episodes int, baseSeed uint64) (*Curv
 			tStat = diffVector / pooledSE
 		}
 		pVal := pkgmath.StudentTCDFTwoTailed(math.Abs(tStat), float64(episodes-1))
+		tCrit := pkgmath.StudentTCriticalValue(0.05, float64(episodes-1))
+		margin := tCrit * pooledSE
 
 		finiteDiffs = append(finiteDiffs, FiniteDiffContrast{
 			FromParam: float64(k1),
 			ToParam:   float64(k2),
 			MeanDelta: diffVector,
-			CI95Low:   diffVector - 1.96*pooledSE,
-			CI95High:  diffVector + 1.96*pooledSE,
+			CI95Low:   diffVector - margin,
+			CI95High:  diffVector + margin,
 			TStat:     tStat,
 			PValue:    pVal,
 		})

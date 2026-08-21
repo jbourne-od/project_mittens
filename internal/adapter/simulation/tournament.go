@@ -92,22 +92,22 @@ func (d TripartiteDecomposition) SummaryString() string {
 
 // FactorialDecomposition2x2 encapsulates the full 2x2 factorial experimental evaluation.
 type FactorialDecomposition2x2 struct {
-	V00_LegacyBlind           float64                   `json:"v00_legacy_blind"`          // Legacy Action Space + Blind Belief
-	V01_LegacyInformed        float64                   `json:"v01_legacy_informed"`       // Legacy Action Space + Informed Belief
-	V10_CompetitiveBlind      float64                   `json:"v10_competitive_blind"`     // Competitive Action Space + Blind Belief
-	V11_CompetitiveInformed   float64                   `json:"v11_competitive_informed"`  // Competitive Action Space + Informed Belief
-	DeltaA_Blind              float64                   `json:"delta_a_blind"`             // V10 - V00: Competitive-policy effect under blind belief
-	DeltaA_Informed           float64                   `json:"delta_a_informed"`          // V11 - V01: Competitive-policy effect under informed belief
-	DeltaI_Legacy             float64                   `json:"delta_i_legacy"`            // V01 - V00: Information effect under legacy policy
-	DeltaI_Comp               float64                   `json:"delta_i_comp"`              // V11 - V10: Information effect under competitive policy
+	V00_LegacyBlind           float64                   `json:"v00_legacy_blind"`         // Legacy Action Space + Blind Belief
+	V01_LegacyInformed        float64                   `json:"v01_legacy_informed"`      // Legacy Action Space + Informed Belief
+	V10_CompetitiveBlind      float64                   `json:"v10_competitive_blind"`    // Competitive Action Space + Blind Belief
+	V11_CompetitiveInformed   float64                   `json:"v11_competitive_informed"` // Competitive Action Space + Informed Belief
+	DeltaA_Blind              float64                   `json:"delta_a_blind"`            // V10 - V00: Competitive-policy effect under blind belief
+	DeltaA_Informed           float64                   `json:"delta_a_informed"`         // V11 - V01: Competitive-policy effect under informed belief
+	DeltaI_Legacy             float64                   `json:"delta_i_legacy"`           // V01 - V00: Information effect under legacy policy
+	DeltaI_Comp               float64                   `json:"delta_i_comp"`             // V11 - V10: Information effect under competitive policy
 	ConditionalVoIUnderLegacy float64                   `json:"conditional_voi_under_legacy"`
 	ConditionalVoIUnderComp   float64                   `json:"conditional_voi_under_comp"`
-	InteractionEffect         float64                   `json:"interaction_effect"`        // (V11 - V10) - (V01 - V00): Supermodular Complementarity
-	InteractionTest           pkgmath.PairedTTestResult `json:"interaction_test"`          // Paired statistical hypothesis test on D_i
-	MainEffectActionSpace     float64                   `json:"main_effect_action_space"`  // 0.5 * [DeltaA_Blind + DeltaA_Informed]
-	MainEffectInformation     float64                   `json:"main_effect_information"`   // 0.5 * [DeltaI_Legacy + DeltaI_Comp]
-	TotalLift                 float64                   `json:"total_lift"`                // V11 - V00
-	TotalLiftPercent          float64                   `json:"total_lift_percent"`        // ((V11 - V00) / |V00|) * 100
+	InteractionEffect         float64                   `json:"interaction_effect"`       // (V11 - V10) - (V01 - V00): Supermodular Complementarity
+	InteractionTest           pkgmath.PairedTTestResult `json:"interaction_test"`         // Paired statistical hypothesis test on D_i
+	MainEffectActionSpace     float64                   `json:"main_effect_action_space"` // 0.5 * [DeltaA_Blind + DeltaA_Informed]
+	MainEffectInformation     float64                   `json:"main_effect_information"`  // 0.5 * [DeltaI_Legacy + DeltaI_Comp]
+	TotalLift                 float64                   `json:"total_lift"`               // V11 - V00
+	TotalLiftPercent          float64                   `json:"total_lift_percent"`       // ((V11 - V00) / |V00|) * 100
 }
 
 // SummaryString formats the 2x2 factorial analysis.

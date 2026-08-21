@@ -515,10 +515,17 @@ func (s *Server) ExplainDecision(ctx context.Context, req *mittensv1.ExplainDeci
 		})
 	}
 
+	evaluatedArcsCount := 0
+	if entry.Provenance.EvaluatedArcs != nil {
+		evaluatedArcsCount = len(entry.Provenance.EvaluatedArcs)
+	} else if len(explanation.MatchedExplanations) > 0 {
+		evaluatedArcsCount = len(explanation.MatchedExplanations)
+	}
+
 	return &mittensv1.ExplainDecisionResponse{
 		DecisionId:         req.DecisionId,
 		PolicyClass:        explanation.PolicyName,
-		EvaluatedArcsCount: int32(explanation.TotalDrivers),
+		EvaluatedArcsCount: int32(evaluatedArcsCount),
 		TopCandidates:      topCandidates,
 		MarkdownSummary:    formatter.FormatMarkdown(explanation),
 	}, nil
@@ -542,6 +549,10 @@ func (s *Server) ReplayDecision(ctx context.Context, req *mittensv1.ReplayDecisi
 		} else {
 			return nil, status.Errorf(codes.NotFound, "no cryptographic record found for decision ID '%s'", req.DecisionId)
 		}
+	}
+
+	if cryptoRec.PolicyName != "" && !strings.HasPrefix(strings.ToUpper(cryptoRec.PolicyName), "CFA") {
+		return nil, status.Errorf(codes.InvalidArgument, "policy class '%s' is not supported via gRPC replay; only CFA is currently supported", cryptoRec.PolicyName)
 	}
 
 	res, err := pkgjournal.DecodeCanonicalResource(cryptoRec.ResourceStateBytes)
@@ -605,10 +616,16 @@ func (s *Server) VerifyMerkleChain(ctx context.Context, req *mittensv1.VerifyMer
 		msg = err.Error()
 	}
 
+	records, _ := s.cryptoStore.ListByRun(req.RunId)
+	recordCount := len(records)
+	if recordCount == 0 && valid {
+		recordCount = 1
+	}
+
 	return &mittensv1.VerifyMerkleChainResponse{
 		RunId:                req.RunId,
 		IsValid:              valid,
-		TotalRecordsVerified: 1,
+		TotalRecordsVerified: int64(recordCount),
 		LatestRecordHash:     lastHash,
 		VerificationMessage:  msg,
 	}, nil
@@ -642,6 +659,14 @@ func protoToDriver(d *mittensv1.Driver, defaultEpoch int64) model.Driver {
 		eqType = parseEquipmentType(d.Equipment.Type)
 	}
 
+	var endorsements []model.Endorsement
+	if d.HazmatCertified {
+		endorsements = append(endorsements, model.EndorsementHazmat)
+	}
+	if d.TeamDriver {
+		endorsements = append(endorsements, model.EndorsementTeam)
+	}
+
 	availEpoch := d.AvailableEpoch
 	if availEpoch <= 0 {
 		availEpoch = defaultEpoch
@@ -663,8 +688,13 @@ func protoToDriver(d *mittensv1.Driver, defaultEpoch int64) model.Driver {
 		AvailableEpoch:      availEpoch,
 		DriveHoursRemaining: driveRem,
 		DutyHoursRemaining:  dutyRem,
-		Equipment:           model.Equipment{Type: eqType},
-		Clocks:              hos.NewDriverClocks(hos.USPolicySpecs(), time.Unix(availEpoch, 0)),
+		Equipment: model.Equipment{
+			Type:         eqType,
+			Endorsements: endorsements,
+		},
+		Endorsements: endorsements,
+		Clocks:       hos.NewDriverClocks(hos.USPolicySpecs(), time.Unix(availEpoch, 0)),
+		PolicySpecs:  hos.USPolicySpecs(),
 	}
 }
 
@@ -687,6 +717,14 @@ func protoToLoad(l *mittensv1.Load) model.Load {
 		}
 	}
 
+	var reqEndorsements []model.Endorsement
+	if l.Hazmat {
+		reqEndorsements = append(reqEndorsements, model.EndorsementHazmat)
+	}
+	if l.RequiresTeam {
+		reqEndorsements = append(reqEndorsements, model.EndorsementTeam)
+	}
+
 	return model.Load{
 		ID:                    l.Id,
 		Origin:                orig,
@@ -697,6 +735,7 @@ func protoToLoad(l *mittensv1.Load) model.Load {
 		DeliveryLatestEpoch:   l.DeliveryLatestEpoch,
 		Revenue:               l.Revenue,
 		RequiredEquipment:     parseEquipmentType(l.RequiredEquipment),
+		RequiredEndorsements:  reqEndorsements,
 	}
 }
 
@@ -711,11 +750,11 @@ func protoToCostConfig(c *mittensv1.CostConfig) model.CostConfig {
 	if c.EmptyCostPerMile > 0 {
 		cfg.EmptyMileRate = c.EmptyCostPerMile
 	}
-	if c.LatePickupPenaltyPerHour > 0 {
-		cfg.EarlyArrivalPerHour = c.LatePickupPenaltyPerHour
-	}
 	if c.LateDeliveryPenaltyPerHour > 0 {
 		cfg.LateDeliveryPerHour = c.LateDeliveryPenaltyPerHour
+	}
+	if c.DwellCostPerHour > 0 {
+		cfg.EarlyArrivalPerHour = c.DwellCostPerHour
 	}
 	return cfg
 }
@@ -741,7 +780,7 @@ func provenanceToProto(prov policy.DecisionProvenance) *mittensv1.DecisionProven
 			PostDecisionStateValue: ea.VFAValue,
 			CompetitorRiskDiscount: ea.DLAValue,
 			TotalScore:             ea.TotalScore,
-			Feasible:               ea.IsAssigned,
+			Feasible:               true, // Candidate evaluations in provenance are feasible candidate arcs
 		}
 	}
 

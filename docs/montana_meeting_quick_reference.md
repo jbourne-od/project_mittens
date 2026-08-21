@@ -39,7 +39,10 @@ From the repository root (`/Users/jacob/Development/od/project_mittens`):
 ./bin/tournament -mode curves -episodes 50
 ```
 * **What it shows:** Continuous sweeps across **Tender Flow** ($\lambda \in [10, 30]$), **Fleet Capacity** ($K \in [6, 20]$), and **Horizon** ($H \in [3, 30]$ days) with paired finite differences.
-* **Key Talking Point:** Point out **Empirical Proposition 4**: Complementarity amplifies under high tender density (interaction jumps to $+\$4,054$ and lift reaches $+28.1\%$ at $2.5 : 1$ load-to-truck ratio), while horizon rollouts reveal per-day information attenuation ($\$311/\text{day} \to \$81/\text{day}$) against constant blind mispricing bleeding ($-\$72/\text{day}$).
+* **Key Talking Point:** Point out **Empirical Proposition 4**:
+  1. *Market Thickness:* At identical $2.5:1$ load-to-truck ratios, thicker markets $(25, 10) \implies +\$4,391$ interaction vs $(15, 6) \implies +\$2,478$, proving market thickness $(\lambda, K)$ independently expands option value.
+  2. *Transient Saturation:* Cumulative blind damage ($-\$837 \to -\$2,272$) and informed premium ($+\$2,447 \to +\$2,645$) both saturate after 14–21 days as the Bayes filter converges.
+  3. *Evidence Hierarchy:* Confirmatory grid ($N=500$) establishes $+\$4,054$ ($+28.1\%$ lift) at $2.5:1$, while continuous curves ($N=100$) map shape and test paired finite differences ($\delta_{\theta, i}$).
 
 ### Demo 4: Monopolistic Reduction vs. Competitive Superiority
 ```bash

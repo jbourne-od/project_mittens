@@ -1852,53 +1852,86 @@ func (rep *FullComparativeStaticsReport) SummaryString() string {
 	sb.WriteString("--------------------------------------------------------------------------------\n")
 	sb.WriteString(" 1. TENDER DENSITY RESPONSE CURVE (Hold H = 7 Days, K = 10 Drivers)\n")
 	sb.WriteString("--------------------------------------------------------------------------------\n")
-	sb.WriteString(fmt.Sprintf(" %-6s | %-6s | %-9s | %-9s | %-15s | %-12s | %-12s | %-12s | %-10s\n",
+	sb.WriteString(fmt.Sprintf(" %-6s | %-6s | %-9s | %-9s | %-16s | %-12s | %-12s | %-14s | %-10s\n",
 		"Loads", "Ratio", "V00", "V11", "Total Lift", "Δ_I|comp", "Δ_int", "95% CI", "Δ_int/Day"))
 	sb.WriteString("--------------------------------------------------------------------------------\n")
 	for _, pt := range rep.DensitySweep.Points {
-		sb.WriteString(fmt.Sprintf(" %-6.0f | %4.2f:1 | $%8.2f | $%8.2f | +$%7.2f (%+5.1f%%) | +$%10.2f | +$%10.2f | [%+5.0f, %+5.0f] | +$%7.2f/d\n",
+		sb.WriteString(fmt.Sprintf(" %-6.0f | %4.2f:1 | $%8.2f | $%8.2f | +$%8.2f (%+5.1f%%) | +$%10.2f | +$%10.2f | [%+6.0f, %+6.0f] | +$%7.2f/d\n",
 			pt.ParamValue, pt.ScarcityRatio, pt.V00Mean, pt.V11Mean, pt.TotalLiftDollars, pt.TotalLiftPct,
 			pt.DeltaCompVoI, pt.InteractionMean, pt.InteractionCI95L, pt.InteractionCI95H, pt.InteractionPerDay))
 	}
-	sb.WriteString("\n Paired Finite Differences Across Density Steps (Testing E[D(λ_{j+1}) - D(λ_j)] > 0):\n")
+	sb.WriteString("\n Paired Stepwise Finite Differences Across Density Steps (Testing E[D(λ_{j+1}) - D(λ_j)] > 0):\n")
+	sb.WriteString(" --------------------------------------------------------------------------------\n")
+	sb.WriteString(fmt.Sprintf(" %-12s | %-20s | %-23s | %-11s | %-8s\n",
+		"Transition", "Mean Δ(Interaction)", "95% Confidence Interval", "t-Statistic", "p-Value"))
+	sb.WriteString(" --------------------------------------------------------------------------------\n")
 	for _, fd := range rep.DensitySweep.FiniteDiffs {
-		sb.WriteString(fmt.Sprintf("  • Step λ: %.0f -> %.0f | Δ(Interaction) = %+.2f | 95%% CI: [%+.2f, %+.2f] | t = %+5.2f | p = %.2e\n",
-			fd.FromParam, fd.ToParam, fd.MeanDelta, fd.CI95Low, fd.CI95High, fd.TStat, fd.PValue))
+		sign := "+"
+		if fd.MeanDelta < 0 {
+			sign = "-"
+		}
+		sb.WriteString(fmt.Sprintf(" λ: %2.0f -> %-2.0f | %s$%10.2f          | [%+10.2f, %+10.2f] |   %+6.2f    | %.4f\n",
+			fd.FromParam, fd.ToParam, sign, math.Abs(fd.MeanDelta), fd.CI95Low, fd.CI95High, fd.TStat, fd.PValue))
 	}
-	sb.WriteString("\n")
+	sb.WriteString(" --------------------------------------------------------------------------------\n\n")
 
 	// 2. Capacity Curve
 	sb.WriteString("--------------------------------------------------------------------------------\n")
 	sb.WriteString(" 2. FLEET CAPACITY RESPONSE CURVE (Hold H = 7 Days, λ = 15 Loads/Epoch)\n")
 	sb.WriteString("--------------------------------------------------------------------------------\n")
-	sb.WriteString(fmt.Sprintf(" %-6s | %-6s | %-9s | %-9s | %-15s | %-12s | %-12s | %-12s | %-10s\n",
+	sb.WriteString(fmt.Sprintf(" %-6s | %-6s | %-9s | %-9s | %-16s | %-12s | %-12s | %-14s | %-10s\n",
 		"Trucks", "Ratio", "V00", "V11", "Total Lift", "Δ_I|comp", "Δ_int", "95% CI", "Δ_int/Day"))
 	sb.WriteString("--------------------------------------------------------------------------------\n")
 	for _, pt := range rep.CapacitySweep.Points {
-		sb.WriteString(fmt.Sprintf(" %-6.0f | %4.2f:1 | $%8.2f | $%8.2f | +$%7.2f (%+5.1f%%) | +$%10.2f | +$%10.2f | [%+5.0f, %+5.0f] | +$%7.2f/d\n",
+		sb.WriteString(fmt.Sprintf(" %-6.0f | %4.2f:1 | $%8.2f | $%8.2f | +$%8.2f (%+5.1f%%) | +$%10.2f | +$%10.2f | [%+6.0f, %+6.0f] | +$%7.2f/d\n",
 			pt.ParamValue, pt.ScarcityRatio, pt.V00Mean, pt.V11Mean, pt.TotalLiftDollars, pt.TotalLiftPct,
 			pt.DeltaCompVoI, pt.InteractionMean, pt.InteractionCI95L, pt.InteractionCI95H, pt.InteractionPerDay))
 	}
-	sb.WriteString("\n Paired Finite Differences Across Capacity Steps (Testing Scarcity Amplification):\n")
+	sb.WriteString("\n Paired Stepwise Finite Differences Across Capacity Steps (Testing Scarcity Amplification):\n")
+	sb.WriteString(" --------------------------------------------------------------------------------\n")
+	sb.WriteString(fmt.Sprintf(" %-12s | %-20s | %-23s | %-11s | %-8s\n",
+		"Transition", "Mean Δ(Interaction)", "95% Confidence Interval", "t-Statistic", "p-Value"))
+	sb.WriteString(" --------------------------------------------------------------------------------\n")
 	for _, fd := range rep.CapacitySweep.FiniteDiffs {
-		sb.WriteString(fmt.Sprintf("  • Step K: %.0f -> %.0f | Δ(Interaction) = %+.2f | 95%% CI: [%+.2f, %+.2f] | t = %+5.2f | p = %.2e\n",
-			fd.FromParam, fd.ToParam, fd.MeanDelta, fd.CI95Low, fd.CI95High, fd.TStat, fd.PValue))
+		sign := "+"
+		if fd.MeanDelta < 0 {
+			sign = "-"
+		}
+		sb.WriteString(fmt.Sprintf(" K: %2.0f -> %-2.0f | %s$%10.2f          | [%+10.2f, %+10.2f] |   %+6.2f    | %.4f\n",
+			fd.FromParam, fd.ToParam, sign, math.Abs(fd.MeanDelta), fd.CI95Low, fd.CI95High, fd.TStat, fd.PValue))
 	}
-	sb.WriteString("\n")
+	sb.WriteString(" --------------------------------------------------------------------------------\n\n")
 
 	// 3. Horizon Curve
 	sb.WriteString("--------------------------------------------------------------------------------\n")
 	sb.WriteString(" 3. HORIZON RESPONSE CURVE (Hold K = 10 Drivers, λ = 15 Loads/Epoch)\n")
 	sb.WriteString("--------------------------------------------------------------------------------\n")
-	sb.WriteString(fmt.Sprintf(" %-6s | %-15s | %-13s | %-13s | %-13s | %-13s | %-10s\n",
-		"Days", "Total Lift", "Δ_I|comp (Tot)", "Δ_I|comp (/d)", "Δ_A|blind (/d)", "Δ_int (Tot)", "Δ_int (/d)"))
+	sb.WriteString(fmt.Sprintf(" %-4s | %-17s | %-12s | %-11s | %-12s | %-11s | %-12s | %-10s\n",
+		"Days", "Total Lift", "Δ_I|comp(Tot)", "Δ_I|comp(/d)", "Δ_A|blnd(Tot)", "Δ_A|blnd(/d)", "Δ_int (Tot)", "Δ_int (/d)"))
 	sb.WriteString("--------------------------------------------------------------------------------\n")
 	for _, pt := range rep.HorizonSweep.Points {
-		sb.WriteString(fmt.Sprintf(" %-6.0f | +$%7.2f (%+5.1f%%) | +$%11.2f | +$%11.2f/d | -$%11.2f/d | +$%11.2f | +$%8.2f/d\n",
-			pt.ParamValue, pt.TotalLiftDollars, pt.TotalLiftPct, pt.DeltaCompVoI, pt.CompVoIPerDay,
-			math.Abs(pt.BlindVoAPerDay), pt.InteractionMean, pt.InteractionPerDay))
+		blindTot := pt.BlindVoAPerDay * pt.ParamValue
+		blindTotSign := "+"
+		if blindTot < 0 {
+			blindTotSign = "-"
+		}
+		blindPerDaySign := "+"
+		if pt.BlindVoAPerDay < 0 {
+			blindPerDaySign = "-"
+		}
+		totalSign := "+"
+		if pt.TotalLiftDollars < 0 {
+			totalSign = "-"
+		}
+		sb.WriteString(fmt.Sprintf(" %-4.0f | %s$%8.2f (%+5.1f%%) | +$%10.2f | +$%8.2f/d | %s$%10.2f | %s$%8.2f/d | +$%10.2f | +$%7.2f/d\n",
+			pt.ParamValue, totalSign, math.Abs(pt.TotalLiftDollars), pt.TotalLiftPct,
+			pt.DeltaCompVoI, pt.CompVoIPerDay,
+			blindTotSign, math.Abs(blindTot),
+			blindPerDaySign, math.Abs(pt.BlindVoAPerDay),
+			pt.InteractionMean, pt.InteractionPerDay))
 	}
-	sb.WriteString("\n")
+	sb.WriteString("--------------------------------------------------------------------------------\n")
+	sb.WriteString(" *Identity check: Total Lift = Δ_A|blind(Tot) + Δ_I|comp(Tot)\n")
 	sb.WriteString("================================================================================\n")
 	return sb.String()
 }

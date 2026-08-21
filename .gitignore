@@ -31,3 +31,11 @@ web/dist/*
 web/node_modules/
 .agents/
 
+# Python cache artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Benchmark outputs
+tournament_results.json
+grid*.json

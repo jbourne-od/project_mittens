@@ -285,4 +285,41 @@ func TestTournament_FailClosedOnInvalidConfig(t *testing.T) {
 	if err == nil {
 		t.Error("expected TournamentRunner.RunFactorial2x2 to fail closed on invalid market config, got nil")
 	}
+
+	// 5. 4-way runner with invalid market config fails closed
+	_, err = runner.Run4Way(context.Background())
+	if err == nil {
+		t.Error("expected TournamentRunner.Run4Way to fail closed on invalid market config, got nil")
+	}
+}
+
+// TestTournament_4WayBenchmark executes a multi-policy benchmark comparing PFA, CFA, VFA, DLA, and Competitive POMDP.
+func TestTournament_4WayBenchmark(t *testing.T) {
+	cfg := simulation.DefaultTournamentConfig()
+	cfg.Episodes = 3
+	cfg.HorizonDays = 2
+	cfg.DecisionStepHours = 12
+	cfg.DriverCount = 8
+	cfg.LoadsPerEpoch = 12
+
+	runner := simulation.NewTournamentRunner(cfg)
+	report, err := runner.Run4Way(context.Background())
+	if err != nil {
+		t.Fatalf("Run4Way failed: %v", err)
+	}
+
+	if len(report.Policies) != 5 {
+		t.Fatalf("expected 5 policies in 4-way report, got %d", len(report.Policies))
+	}
+
+	t.Logf("\n%s", report.SummaryString())
+
+	for _, p := range report.Policies {
+		if p.MeanNetContribution == 0 {
+			t.Errorf("policy %s has zero net contribution", p.PolicyClass)
+		}
+		if p.MeanLatencyMs < 0 {
+			t.Errorf("policy %s has negative latency: %f", p.PolicyClass, p.MeanLatencyMs)
+		}
+	}
 }

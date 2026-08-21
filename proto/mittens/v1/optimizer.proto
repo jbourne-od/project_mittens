@@ -1,0 +1,261 @@
+syntax = "proto3";
+
+package mittens.v1;
+
+option go_package = "github.com/optimaldynamics/project-mittens/proto/mittens/v1;mittensv1";
+
+// ============================================================================
+// Service Definition
+// ============================================================================
+
+// OptimizerService provides high-performance binary RPC endpoints for carrier
+// fleet dispatch, MOMDP competitor-aware matching, streaming telemetry, and Merkle audits.
+service OptimizerService {
+  // Optimize executes single-epoch optimal fleet matching via exact LAPJV and Powell policy approximations.
+  rpc Optimize(OptimizeRequest) returns (OptimizeResponse);
+
+  // StreamTelemetry ingests real-time GPS and ELD Hours-of-Service driver telemetry.
+  rpc StreamTelemetry(StreamTelemetryRequest) returns (StreamTelemetryResponse);
+
+  // StreamTenders ingests incoming spot tenders and contract load commitments.
+  rpc StreamTenders(StreamTendersRequest) returns (StreamTendersResponse);
+
+  // PlanRepositioning computes empty tractor rebalancing moves across regional nodes.
+  rpc PlanRepositioning(RepositionPlanRequest) returns (RepositionPlanResponse);
+
+  // ExplainDecision returns mathematical provenance and marginal attribution for a committed dispatch.
+  rpc ExplainDecision(ExplainDecisionRequest) returns (ExplainDecisionResponse);
+
+  // ReplayDecision executes bit-exact deterministic replay of a past optimization epoch.
+  rpc ReplayDecision(ReplayDecisionRequest) returns (ReplayDecisionResponse);
+
+  // VerifyMerkleChain cryptographically validates the tamper-evident SHA-256 audit log.
+  rpc VerifyMerkleChain(VerifyMerkleChainRequest) returns (VerifyMerkleChainResponse);
+}
+
+// ============================================================================
+// Domain Models & DTOs
+// ============================================================================
+
+message Location {
+  string node_id = 1;
+  double lat = 2;
+  double lon = 3;
+}
+
+message Equipment {
+  string type = 1;
+  double length_feet = 2;
+  double weight_capacity_lbs = 3;
+}
+
+message Driver {
+  string id = 1;
+  Location current_location = 2;
+  Location home_location = 3;
+  int64 available_epoch = 4;
+  Equipment equipment = 5;
+  double remaining_drive_hours = 6;
+  double remaining_duty_hours = 7;
+  double remaining_cycle_hours = 8;
+  bool hazmat_certified = 9;
+  bool team_driver = 10;
+  string dedicated_customer_id = 11;
+  repeated string preferred_destinations = 12;
+}
+
+message Load {
+  string id = 1;
+  Location origin = 2;
+  Location destination = 3;
+  string required_equipment = 4;
+  double revenue = 5;
+  int64 pickup_earliest_epoch = 6;
+  int64 pickup_latest_epoch = 7;
+  int64 delivery_earliest_epoch = 8;
+  int64 delivery_latest_epoch = 9;
+  double weight_lbs = 10;
+  bool hazmat = 11;
+  bool requires_team = 12;
+  bool contract_load = 13;
+  string customer_id = 14;
+}
+
+message CostConfig {
+  double loaded_cost_per_mile = 1;
+  double empty_cost_per_mile = 2;
+  double late_pickup_penalty_per_hour = 3;
+  double late_delivery_penalty_per_hour = 4;
+  double dwell_cost_per_hour = 5;
+  double layover_cost_per_day = 6;
+}
+
+message FeasibilityConfig {
+  double max_empty_miles = 1;
+  bool allow_driver_tours = 2;
+  bool enforce_hos = 3;
+}
+
+message Match {
+  string driver_id = 1;
+  string load_id = 2;
+  int64 dispatch_epoch = 3;
+  double estimated_contribution = 4;
+  double empty_miles = 5;
+  double loaded_miles = 6;
+  bool is_relay = 7;
+}
+
+message SpotBid {
+  string load_id = 1;
+  double rate_per_mile = 2;
+  double total_bid_amount = 3;
+  double estimated_win_probability = 4;
+}
+
+message CandidateEvaluation {
+  string driver_id = 1;
+  string load_id = 2;
+  double net_contribution = 3;
+  double post_decision_state_value = 4;
+  double competitor_risk_discount = 5;
+  double total_score = 6;
+  bool feasible = 7;
+  string infeasibility_reason = 8;
+}
+
+message DecisionProvenance {
+  string optimization_run_id = 1;
+  int64 batch_epoch = 2;
+  string policy_name = 3;
+  repeated double theta_parameters = 4;
+  repeated CandidateEvaluation evaluated_arcs = 5;
+  int32 matched_count = 6;
+  double total_net_contribution = 7;
+  double total_objective_value = 8;
+  map<string, double> active_belief_vector = 9;
+  map<string, double> pricing_variables = 10;
+}
+
+// ============================================================================
+// Request & Response Messages
+// ============================================================================
+
+message OptimizeRequest {
+  string policy_class = 1;       // PFA, CFA, VFA, DLA
+  string competitor_scale = 2;   // N0, N1, N_GENERIC
+  int64 epoch = 3;
+  repeated Driver drivers = 4;
+  repeated Load loads = 5;
+  CostConfig cost_config = 6;
+  FeasibilityConfig feasibility_config = 7;
+  bool enable_relays = 8;
+}
+
+message OptimizeResponse {
+  string decision_id = 1;
+  string run_id = 2;
+  int64 epoch = 3;
+  int32 match_count = 4;
+  repeated Match matches = 5;
+  repeated SpotBid spot_bids = 6;
+  double total_net_contribution = 7;
+  double total_objective_value = 8;
+  double execution_duration_ms = 9;
+  DecisionProvenance provenance = 10;
+  string state_hash = 11;
+}
+
+message StreamTelemetryRequest {
+  string driver_id = 1;
+  int64 epoch = 2;
+  Location current_location = 3;
+  double remaining_drive_hours = 4;
+  double remaining_duty_hours = 5;
+  double remaining_cycle_hours = 6;
+}
+
+message StreamTelemetryResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+message StreamTendersRequest {
+  repeated Load loads = 1;
+}
+
+message StreamTendersResponse {
+  int32 accepted_count = 1;
+  string message = 2;
+}
+
+message RepositionPlanRequest {
+  int64 epoch = 1;
+  repeated Driver idle_drivers = 2;
+  repeated string target_regions = 3;
+  double max_reposition_distance_miles = 4;
+}
+
+message RepositionMove {
+  string driver_id = 1;
+  string origin_region = 2;
+  string destination_region = 3;
+  double estimated_empty_miles = 4;
+  double expected_downstream_value_lift = 5;
+}
+
+message RepositionPlanResponse {
+  int32 move_count = 1;
+  repeated RepositionMove moves = 2;
+  double total_reposition_cost = 3;
+  double expected_net_lift = 4;
+}
+
+message ExplainDecisionRequest {
+  string decision_id = 1;
+}
+
+message ArcExplanation {
+  string driver_id = 1;
+  string load_id = 2;
+  double base_revenue = 3;
+  double travel_cost = 4;
+  double post_decision_value = 5;
+  double risk_discount = 6;
+  double net_objective = 7;
+  bool selected = 8;
+  string explanation_text = 9;
+}
+
+message ExplainDecisionResponse {
+  string decision_id = 1;
+  string policy_class = 2;
+  int32 evaluated_arcs_count = 3;
+  repeated ArcExplanation top_candidates = 4;
+  string markdown_summary = 5;
+}
+
+message ReplayDecisionRequest {
+  string decision_id = 1;
+}
+
+message ReplayDecisionResponse {
+  string decision_id = 1;
+  string status = 2; // BIT_EXACT_MATCH, DIVERGENCE_DETECTED
+  double drift_amount = 3;
+  bool initial_state_hash_match = 4;
+  bool action_hash_match = 5;
+  string details = 6;
+}
+
+message VerifyMerkleChainRequest {
+  string run_id = 1;
+}
+
+message VerifyMerkleChainResponse {
+  string run_id = 1;
+  bool is_valid = 2;
+  int64 total_records_verified = 3;
+  string latest_record_hash = 4;
+  string verification_message = 5;
+}

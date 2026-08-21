@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
@@ -89,34 +92,39 @@ func (d TripartiteDecomposition) SummaryString() string {
 
 // FactorialDecomposition2x2 encapsulates the full 2x2 factorial experimental evaluation.
 type FactorialDecomposition2x2 struct {
-	V00_LegacyBlind           float64 `json:"v00_legacy_blind"`             // Legacy Action Space + Blind Belief
-	V01_LegacyInformed        float64 `json:"v01_legacy_informed"`          // Legacy Action Space + Informed Belief
-	V10_CompetitiveBlind      float64 `json:"v10_competitive_blind"`        // Competitive Action Space + Blind Belief
-	V11_CompetitiveInformed   float64 `json:"v11_competitive_informed"`     // Competitive Action Space + Informed Belief
-	MainEffectActionSpace     float64 `json:"main_effect_action_space"`     // 0.5 * [(V10 - V00) + (V11 - V01)]
-	MainEffectInformation     float64 `json:"main_effect_information"`      // 0.5 * [(V01 - V00) + (V11 - V10)]
-	InteractionEffect         float64 `json:"interaction_effect"`           // V11 - V10 - V01 + V00 (Complementarity)
-	TotalLift                 float64 `json:"total_lift"`                   // V11 - V00
-	ConditionalVoIUnderComp   float64 `json:"conditional_voi_under_comp"`   // V11 - V10
-	ConditionalVoIUnderLegacy float64 `json:"conditional_voi_under_legacy"` // V01 - V00
+	V00_LegacyBlind         float64                   `json:"v00_legacy_blind"`          // Legacy Action Space + Blind Belief
+	V01_LegacyInformed      float64                   `json:"v01_legacy_informed"`       // Legacy Action Space + Informed Belief
+	V10_CompetitiveBlind    float64                   `json:"v10_competitive_blind"`     // Competitive Action Space + Blind Belief
+	V11_CompetitiveInformed float64                   `json:"v11_competitive_informed"`  // Competitive Action Space + Informed Belief
+	DeltaA_Blind            float64                   `json:"delta_a_blind"`             // V10 - V00: Competitive-policy effect under blind belief
+	DeltaA_Informed         float64                   `json:"delta_a_informed"`          // V11 - V01: Competitive-policy effect under informed belief
+	DeltaI_Legacy           float64                   `json:"delta_i_legacy"`            // V01 - V00: Information effect under legacy policy
+	DeltaI_Comp             float64                   `json:"delta_i_comp"`              // V11 - V10: Information effect under competitive policy
+	InteractionEffect       float64                   `json:"interaction_effect"`        // (V11 - V10) - (V01 - V00): Supermodular Complementarity
+	InteractionTest         pkgmath.PairedTTestResult `json:"interaction_test"`          // Paired statistical hypothesis test on D_i
+	MainEffectActionSpace   float64                   `json:"main_effect_action_space"`  // 0.5 * [DeltaA_Blind + DeltaA_Informed]
+	MainEffectInformation   float64                   `json:"main_effect_information"`   // 0.5 * [DeltaI_Legacy + DeltaI_Comp]
+	TotalLift               float64                   `json:"total_lift"`                // V11 - V00
+	TotalLiftPercent        float64                   `json:"total_lift_percent"`        // ((V11 - V00) / |V00|) * 100
 }
 
 // SummaryString formats the 2x2 factorial analysis.
 func (f FactorialDecomposition2x2) SummaryString() string {
 	return fmt.Sprintf(
-		"2x2 Factorial Economic Matrix:\n"+
-			"                   | Blind Belief (b0) | Informed Belief (bt) | Marginal VoI\n"+
-			"  -----------------+-------------------+----------------------+-------------\n"+
-			"  Legacy Action    | V00 = $%9.2f  | V01 = $%9.2f     | $%+9.2f\n"+
-			"  Competitive Act. | V10 = $%9.2f  | V11 = $%9.2f     | $%+9.2f\n"+
-			"  -----------------+-------------------+----------------------+-------------\n"+
-			"  Marginal VoA     | $%+9.2f       | $%+9.2f          | Total: $%+9.2f\n\n"+
-			"  Main Effect of Action Space (VoA):  +$%9.2f\n"+
-			"  Main Effect of Information (VoI):   +$%9.2f\n"+
-			"  Interaction Effect (Complement):   +$%9.2f",
-		f.V00_LegacyBlind, f.V01_LegacyInformed, f.ConditionalVoIUnderLegacy,
-		f.V10_CompetitiveBlind, f.V11_CompetitiveInformed, f.ConditionalVoIUnderComp,
-		f.V10_CompetitiveBlind-f.V00_LegacyBlind, f.V11_CompetitiveInformed-f.V01_LegacyInformed, f.TotalLift,
+		"2x2 Empirical Economic Matrix:\n"+
+			"                   | Blind Belief (b0) | Informed Belief (bt) | Marginal Info Effect\n"+
+			"  -----------------+-------------------+----------------------+----------------------\n"+
+			"  Legacy Action    | V00 = $%9.2f  | V01 = $%9.2f     | Δ_I|legacy = $%+9.2f\n"+
+			"  Competitive Act. | V10 = $%9.2f  | V11 = $%9.2f     | Δ_I|comp   = $%+9.2f\n"+
+			"  -----------------+-------------------+----------------------+----------------------\n"+
+			"  Marginal Action  | Δ_A|blind         | Δ_A|informed         | Total Lift (V11-V00)\n"+
+			"  Effect           | $%+9.2f       | $%+9.2f          | Total: $%+9.2f (+%.2f%%)\n\n"+
+			"  Main Effect of Action Space:       +$%9.2f\n"+
+			"  Main Effect of Information:        +$%9.2f\n"+
+			"  Supermodular Interaction (Δ_int):  +$%9.2f",
+		f.V00_LegacyBlind, f.V01_LegacyInformed, f.DeltaI_Legacy,
+		f.V10_CompetitiveBlind, f.V11_CompetitiveInformed, f.DeltaI_Comp,
+		f.DeltaA_Blind, f.DeltaA_Informed, f.TotalLift, f.TotalLiftPercent,
 		f.MainEffectActionSpace, f.MainEffectInformation, f.InteractionEffect,
 	)
 }
@@ -127,9 +135,44 @@ type FactorialReport2x2 struct {
 	Factorial            FactorialDecomposition2x2 `json:"factorial"`
 	TTestV11VsV00        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v00"`
 	TTestV11VsV10        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v10"`
+	TTestV11VsV01        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v01"`
 	TTestV10VsV00        pkgmath.PairedTTestResult `json:"t_test_v10_vs_v00"`
 	TTestV01VsV00        pkgmath.PairedTTestResult `json:"t_test_v01_vs_v00"`
+	TTestInteraction     pkgmath.PairedTTestResult `json:"t_test_interaction"`
 	ExecutionDurationSec float64                   `json:"execution_duration_sec"`
+}
+
+// SummaryString formats the full statistical scorecard for the 2x2 factorial experiment.
+func (r FactorialReport2x2) SummaryString() string {
+	f := r.Factorial
+	tInt := r.TTestInteraction
+	out := "================================================================================\n" +
+		"          PROJECT MITTENS: 2x2 FACTORIAL VALUE OF INFORMATION & PRICING         \n" +
+		"================================================================================\n" +
+		f.SummaryString() + "\n" +
+		"--------------------------------------------------------------------------------\n" +
+		fmt.Sprintf(" Statistical Contrasts & Hypothesis Tests (N = %d paired episodes):\n", r.TTestV11VsV00.N) +
+		fmt.Sprintf("  • Δ_I|legacy (V01-V00): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Info under legacy)\n",
+			r.TTestV01VsV00.MeanDifference, r.TTestV01VsV00.ConfidenceLow95, r.TTestV01VsV00.ConfidenceHigh95, r.TTestV01VsV00.TStatistic, r.TTestV01VsV00.PValueTwoTailed) +
+		fmt.Sprintf("  • Δ_A|blind  (V10-V00): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Blind competitive hurts)\n",
+			r.TTestV10VsV00.MeanDifference, r.TTestV10VsV00.ConfidenceLow95, r.TTestV10VsV00.ConfidenceHigh95, r.TTestV10VsV00.TStatistic, r.TTestV10VsV00.PValueTwoTailed) +
+		fmt.Sprintf("  • Δ_I|comp   (V11-V10): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Info under competitive)\n",
+			r.TTestV11VsV10.MeanDifference, r.TTestV11VsV10.ConfidenceLow95, r.TTestV11VsV10.ConfidenceHigh95, r.TTestV11VsV10.TStatistic, r.TTestV11VsV10.PValueTwoTailed) +
+		fmt.Sprintf("  • Δ_A|inf    (V11-V01): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Full vs informed legacy)\n",
+			r.TTestV11VsV01.MeanDifference, r.TTestV11VsV01.ConfidenceLow95, r.TTestV11VsV01.ConfidenceHigh95, r.TTestV11VsV01.TStatistic, r.TTestV11VsV01.PValueTwoTailed) +
+		fmt.Sprintf("  • Full Lift  (V11-V00): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Total Mittens advantage: %+5.2f%%)\n",
+			r.TTestV11VsV00.MeanDifference, r.TTestV11VsV00.ConfidenceLow95, r.TTestV11VsV00.ConfidenceHigh95, r.TTestV11VsV00.TStatistic, r.TTestV11VsV00.PValueTwoTailed, r.TTestV11VsV00.PercentLift) +
+		"--------------------------------------------------------------------------------\n" +
+		" Supermodular Interaction Analysis (Complementarity Δ_int = D_i):\n" +
+		fmt.Sprintf("  • Mean Interaction Δ_int:  +$%.2f (SD = $%.2f, SE = $%.2f)\n", tInt.MeanDifference, tInt.StdDevDifference, tInt.StdErrDifference) +
+		fmt.Sprintf("  • 95%% Paired Confidence:   [$+%.2f, $+%.2f]\n", tInt.ConfidenceLow95, tInt.ConfidenceHigh95) +
+		fmt.Sprintf("  • Hypothesis Test:         t = %+6.2f, df = %.0f, p(two-tailed) = %e, Cohen's d_z = %.4f\n", tInt.TStatistic, tInt.DegreesOfFreedom, tInt.PValueTwoTailed, tInt.CohensD) +
+		fmt.Sprintf("  • Episode Attribution:     Positive: %d (%.1f%%) | Negative: %d (%.1f%%) | Exact Tie: %d (%.1f%%)\n",
+			tInt.WinsCandidate, float64(tInt.WinsCandidate)/float64(tInt.N)*100.0,
+			tInt.WinsBaseline, float64(tInt.WinsBaseline)/float64(tInt.N)*100.0,
+			tInt.Ties, float64(tInt.Ties)/float64(tInt.N)*100.0) +
+		"================================================================================\n"
+	return out
 }
 
 // TripartiteReport encapsulates the findings of a 3-way head-to-head tournament.
@@ -140,6 +183,51 @@ type TripartiteReport struct {
 	TTestInformedVsBlind  pkgmath.PairedTTestResult `json:"t_test_informed_vs_blind"`
 	TTestBlindVsLegacy    pkgmath.PairedTTestResult `json:"t_test_blind_vs_legacy"`
 	ExecutionDurationSec  float64                   `json:"execution_duration_sec"`
+}
+
+// FourWayPolicyMetric captures average metrics for a single policy class across tournament episodes.
+type FourWayPolicyMetric struct {
+	PolicyClass         string  `json:"policy_class"`
+	Description         string  `json:"description"`
+	MeanNetContribution float64 `json:"mean_net_contribution"`
+	MeanGrossRevenue    float64 `json:"mean_gross_revenue"`
+	MeanOperatingCost   float64 `json:"mean_operating_cost"`
+	MeanWinRate         float64 `json:"mean_win_rate"`
+	MeanLatencyMs       float64 `json:"mean_latency_ms"`
+	PercentLiftOverPFA  float64 `json:"percent_lift_over_pfa"`
+}
+
+// FourWayReport encapsulates head-to-head empirical comparison across the four universal policy classes.
+type FourWayReport struct {
+	Config               TournamentConfig          `json:"config"`
+	Policies             []FourWayPolicyMetric     `json:"policies"`
+	TTestCFAvsPFA        pkgmath.PairedTTestResult `json:"t_test_cfa_vs_pfa"`
+	TTestVFAvsPFA        pkgmath.PairedTTestResult `json:"t_test_vfa_vs_pfa"`
+	TTestDLAvsPFA        pkgmath.PairedTTestResult `json:"t_test_dla_vs_pfa"`
+	TTestPOMDPvsCFA      pkgmath.PairedTTestResult `json:"t_test_pomdp_vs_cfa"`
+	ExecutionDurationSec float64                   `json:"execution_duration_sec"`
+}
+
+// SummaryString formats the 4-policy benchmark scorecard.
+func (r FourWayReport) SummaryString() string {
+	out := "================================================================================\n" +
+		"       POWELL 4-POLICY BENCHMARK: PFA vs CFA vs VFA vs DLA vs POMDP             \n" +
+		"================================================================================\n" +
+		fmt.Sprintf(" %-16s | %-12s | %-12s | %-10s | %-10s | %-18s\n",
+			"Policy Class", "Net Margin", "Lift vs PFA", "Win Rate", "Latency", "Description") +
+		"--------------------------------------------------------------------------------\n"
+	for _, p := range r.Policies {
+		out += fmt.Sprintf(" %-16s | $%11.2f | %+11.2f%% | %9.2f%% | %7.2f ms | %-18s\n",
+			p.PolicyClass,
+			p.MeanNetContribution,
+			p.PercentLiftOverPFA,
+			p.MeanWinRate*100.0,
+			p.MeanLatencyMs,
+			p.Description,
+		)
+	}
+	out += "================================================================================\n"
+	return out
 }
 
 // TournamentReport encapsulates aggregate statistical findings and hypothesis test results.
@@ -162,6 +250,28 @@ func NewTournamentRunner(cfg TournamentConfig) *TournamentRunner {
 	return &TournamentRunner{cfg: cfg}
 }
 
+func renderProgress(current, total int, label string, start time.Time) {
+	if total <= 0 {
+		return
+	}
+	width := 24
+	percent := float64(current) / float64(total)
+	if percent > 1.0 {
+		percent = 1.0
+	}
+	filled := int(percent * float64(width))
+	if filled > width {
+		filled = width
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	elapsed := time.Since(start).Seconds()
+
+	fmt.Printf("\r\033[K [%s] %3.0f%% (%d/%d) | %s | Elapsed: %.1fs", bar, percent*100.0, current, total, label, elapsed)
+	if current == total {
+		fmt.Printf("\n")
+	}
+}
+
 // Run executes the complete multi-episode tournament comparing N=0 (Myopic) vs N=1 (MOMDP Belief-Filtered).
 func (r *TournamentRunner) Run(ctx context.Context) (*TournamentReport, error) {
 	startTime := time.Now()
@@ -181,6 +291,7 @@ func (r *TournamentRunner) Run(ctx context.Context) (*TournamentReport, error) {
 		default:
 		}
 
+		renderProgress(ep, cfg.Episodes, fmt.Sprintf("Episode %d/%d (N=0 vs N=1)...", ep+1, cfg.Episodes), startTime)
 		epSeed := cfg.BaseSeed + uint64(ep)*7919
 
 		// 1. Run Baseline N=0 (Myopic Monopolistic Policy)
@@ -200,6 +311,8 @@ func (r *TournamentRunner) Run(ctx context.Context) (*TournamentReport, error) {
 		if math.Abs(n0Score.NetContribution) > 1e-6 {
 			lift = (diff / math.Abs(n0Score.NetContribution)) * 100.0
 		}
+
+		renderProgress(ep+1, cfg.Episodes, fmt.Sprintf("Episode %d/%d complete (Lift: %+.1f%%)", ep+1, cfg.Episodes, lift), startTime)
 
 		epResult := EpisodeScore{
 			EpisodeIndex:               ep + 1,
@@ -704,6 +817,7 @@ func (r *TournamentRunner) RunTripartite(ctx context.Context) (*TripartiteReport
 		default:
 		}
 
+		renderProgress(ep, cfg.Episodes, fmt.Sprintf("Episode %d/%d (Tripartite)...", ep+1, cfg.Episodes), startTime)
 		epSeed := cfg.BaseSeed + uint64(ep)*7919
 
 		// 1. Run Legacy Monopolistic (N=0)
@@ -727,6 +841,8 @@ func (r *TournamentRunner) RunTripartite(ctx context.Context) (*TripartiteReport
 		nLegacy[ep] = scoreLegacy.NetContribution
 		nBlind[ep] = scoreBlind.NetContribution
 		nInformed[ep] = scoreInformed.NetContribution
+
+		renderProgress(ep+1, cfg.Episodes, fmt.Sprintf("Episode %d/%d complete", ep+1, cfg.Episodes), startTime)
 	}
 
 	tInformedVsLegacy, err := pkgmath.ComputePairedTTest(nLegacy, nInformed)
@@ -940,41 +1056,96 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	v10 := make([]float64, cfg.Episodes)
 	v11 := make([]float64, cfg.Episodes)
 
-	for ep := 0; ep < cfg.Episodes; ep++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		epSeed := cfg.BaseSeed + uint64(ep)*7919
-
-		// 1. Run V00 (Legacy Action + Blind)
-		s00, err := r.runEpisodeN0(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V00 failed: %w", ep, err)
-		}
-		// 2. Run V01 (Legacy Action + Informed)
-		s01, err := r.runEpisodeN0Informed(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V01 failed: %w", ep, err)
-		}
-		// 3. Run V10 (Competitive Action + Blind)
-		s10, err := r.runEpisodeN1Blind(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V10 failed: %w", ep, err)
-		}
-		// 4. Run V11 (Competitive Action + Informed)
-		s11, err := r.runEpisodeN1(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V11 failed: %w", ep, err)
-		}
-
-		v00[ep] = s00.NetContribution
-		v01[ep] = s01.NetContribution
-		v10[ep] = s10.NetContribution
-		v11[ep] = s11.NetContribution
+	type epResult struct {
+		ep  int
+		v00 float64
+		v01 float64
+		v10 float64
+		v11 float64
+		err error
 	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+	if numWorkers > cfg.Episodes {
+		numWorkers = cfg.Episodes
+	}
+
+	jobs := make(chan int, cfg.Episodes)
+	results := make(chan epResult, cfg.Episodes)
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ep := range jobs {
+				select {
+				case <-ctx.Done():
+					results <- epResult{ep: ep, err: ctx.Err()}
+					return
+				default:
+				}
+
+				epSeed := cfg.BaseSeed + uint64(ep)*7919
+
+				// 1. Run V00 (Legacy Action + Blind)
+				s00, err := r.runEpisodeN0(ctx, epSeed)
+				if err != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial ep %d V00: %w", ep, err)}
+					return
+				}
+				// 2. Run V01 (Legacy Action + Informed)
+				s01, err := r.runEpisodeN0Informed(ctx, epSeed)
+				if err != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial ep %d V01: %w", ep, err)}
+					return
+				}
+				// 3. Run V10 (Competitive Action + Blind)
+				s10, err := r.runEpisodeN1Blind(ctx, epSeed)
+				if err != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial ep %d V10: %w", ep, err)}
+					return
+				}
+				// 4. Run V11 (Competitive Action + Informed)
+				s11, err := r.runEpisodeN1(ctx, epSeed)
+				if err != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial ep %d V11: %w", ep, err)}
+					return
+				}
+
+				results <- epResult{
+					ep:  ep,
+					v00: s00.NetContribution,
+					v01: s01.NetContribution,
+					v10: s10.NetContribution,
+					v11: s11.NetContribution,
+				}
+			}
+		}()
+	}
+
+	for ep := 0; ep < cfg.Episodes; ep++ {
+		jobs <- ep
+	}
+	close(jobs)
+
+	completed := 0
+	for i := 0; i < cfg.Episodes; i++ {
+		res := <-results
+		if res.err != nil {
+			return nil, res.err
+		}
+		v00[res.ep] = res.v00
+		v01[res.ep] = res.v01
+		v10[res.ep] = res.v10
+		v11[res.ep] = res.v11
+		completed++
+		renderProgress(completed, cfg.Episodes, fmt.Sprintf("Episodes completed: %d/%d (Workers: %d)", completed, cfg.Episodes, numWorkers), startTime)
+	}
+	wg.Wait()
 
 	tV11VsV00, err := pkgmath.ComputePairedTTest(v00, v11)
 	if err != nil {
@@ -984,6 +1155,10 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v11 vs v10 failed: %w", err)
 	}
+	tV11VsV01, err := pkgmath.ComputePairedTTest(v01, v11)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test v11 vs v01 failed: %w", err)
+	}
 	tV10VsV00, err := pkgmath.ComputePairedTTest(v00, v10)
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v10 vs v00 failed: %w", err)
@@ -991,6 +1166,18 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	tV01VsV00, err := pkgmath.ComputePairedTTest(v00, v01)
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v01 vs v00 failed: %w", err)
+	}
+
+	// Calculate paired episode-level interaction difference D_i = (V11_i - V10_i) - (V01_i - V00_i)
+	dLegacy := make([]float64, cfg.Episodes)
+	dComp := make([]float64, cfg.Episodes)
+	for i := 0; i < cfg.Episodes; i++ {
+		dLegacy[i] = v01[i] - v00[i]
+		dComp[i] = v11[i] - v10[i]
+	}
+	tInteraction, err := pkgmath.ComputePairedTTest(dLegacy, dComp)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test interaction failed: %w", err)
 	}
 
 	mean00 := tV11VsV00.MeanBaseline
@@ -1002,17 +1189,27 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	mainInfo := 0.5 * ((mean01 - mean00) + (mean11 - mean10))
 	interaction := mean11 - mean10 - mean01 + mean00
 
+	totLift := mean11 - mean00
+	totLiftPct := 0.0
+	if math.Abs(mean00) > 1e-6 {
+		totLiftPct = (totLift / math.Abs(mean00)) * 100.0
+	}
+
 	factorial := FactorialDecomposition2x2{
-		V00_LegacyBlind:           mean00,
-		V01_LegacyInformed:        mean01,
-		V10_CompetitiveBlind:      mean10,
-		V11_CompetitiveInformed:   mean11,
-		MainEffectActionSpace:     mainAction,
-		MainEffectInformation:     mainInfo,
-		InteractionEffect:         interaction,
-		TotalLift:                 mean11 - mean00,
-		ConditionalVoIUnderComp:   mean11 - mean10,
-		ConditionalVoIUnderLegacy: mean01 - mean00,
+		V00_LegacyBlind:         mean00,
+		V01_LegacyInformed:      mean01,
+		V10_CompetitiveBlind:    mean10,
+		V11_CompetitiveInformed: mean11,
+		DeltaA_Blind:            mean10 - mean00,
+		DeltaA_Informed:         mean11 - mean01,
+		DeltaI_Legacy:           mean01 - mean00,
+		DeltaI_Comp:             mean11 - mean10,
+		InteractionEffect:       interaction,
+		InteractionTest:         tInteraction,
+		MainEffectActionSpace:   mainAction,
+		MainEffectInformation:   mainInfo,
+		TotalLift:               totLift,
+		TotalLiftPercent:        totLiftPct,
 	}
 
 	return &FactorialReport2x2{
@@ -1020,9 +1217,470 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 		Factorial:            factorial,
 		TTestV11VsV00:        tV11VsV00,
 		TTestV11VsV10:        tV11VsV10,
+		TTestV11VsV01:        tV11VsV01,
 		TTestV10VsV00:        tV10VsV00,
 		TTestV01VsV00:        tV01VsV00,
+		TTestInteraction:     tInteraction,
 		ExecutionDurationSec: time.Since(startTime).Seconds(),
+	}, nil
+}
+
+// Run4Way executes a comprehensive 5-way benchmark evaluating PFA, CFA, PiecewiseVFA, DLA, and Competitive POMDP
+// across identical stochastic problem instances to produce the canonical Powell policy comparison.
+func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) {
+	startTime := time.Now()
+	cfg := r.cfg
+	if cfg.Episodes < 2 {
+		cfg.Episodes = 2
+	}
+
+	pfaScores := make([]simResult, cfg.Episodes)
+	cfaScores := make([]simResult, cfg.Episodes)
+	vfaScores := make([]simResult, cfg.Episodes)
+	dlaScores := make([]simResult, cfg.Episodes)
+	pomdpScores := make([]simResult, cfg.Episodes)
+
+	pfaNets := make([]float64, cfg.Episodes)
+	cfaNets := make([]float64, cfg.Episodes)
+	vfaNets := make([]float64, cfg.Episodes)
+	dlaNets := make([]float64, cfg.Episodes)
+	pomdpNets := make([]float64, cfg.Episodes)
+
+	pfaLatencies := make([]float64, cfg.Episodes)
+	cfaLatencies := make([]float64, cfg.Episodes)
+	vfaLatencies := make([]float64, cfg.Episodes)
+	dlaLatencies := make([]float64, cfg.Episodes)
+	pomdpLatencies := make([]float64, cfg.Episodes)
+
+	for ep := 0; ep < cfg.Episodes; ep++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		epSeed := cfg.BaseSeed + uint64(ep)*7919
+
+		// 1. PFA (Greedy Direct Contribution)
+		renderProgress(ep*5, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 1. PFA (Greedy Rule)...", ep+1, cfg.Episodes), startTime)
+		t0 := time.Now()
+		sPFA, err := r.runEpisodePFA(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d PFA failed: %w", ep, err)
+		}
+		pfaLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		pfaScores[ep] = sPFA
+		pfaNets[ep] = sPFA.NetContribution
+
+		// 2. CFA (Parametric Cost Function Approximation)
+		renderProgress(ep*5+1, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 2. CFA (SPSA LAP)...", ep+1, cfg.Episodes), startTime)
+		t0 = time.Now()
+		sCFA, err := r.runEpisodeCFA(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d CFA failed: %w", ep, err)
+		}
+		cfaLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		cfaScores[ep] = sCFA
+		cfaNets[ep] = sCFA.NetContribution
+
+		// 3. Piecewise VFA (Downstream Marginal Slopes with CAVE)
+		renderProgress(ep*5+2, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 3. VFA (CAVE Slopes)...", ep+1, cfg.Episodes), startTime)
+		t0 = time.Now()
+		sVFA, err := r.runEpisodeVFA(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d VFA failed: %w", ep, err)
+		}
+		vfaLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		vfaScores[ep] = sVFA
+		vfaNets[ep] = sVFA.NetContribution
+
+		// 4. DLA (Direct Lookahead Approximation)
+		renderProgress(ep*5+3, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 4. DLA (Tree Rollout)...", ep+1, cfg.Episodes), startTime)
+		t0 = time.Now()
+		sDLA, err := r.runEpisodeDLA(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d DLA failed: %w", ep, err)
+		}
+		dlaLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		dlaScores[ep] = sDLA
+		dlaNets[ep] = sDLA.NetContribution
+
+		// 5. Competitive POMDP (Bayesian Belief Simplex + Dynamic Pricing)
+		renderProgress(ep*5+4, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 5. POMDP (Simplex+Bid)...", ep+1, cfg.Episodes), startTime)
+		t0 = time.Now()
+		sPOMDP, err := r.runEpisodeN1(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d POMDP failed: %w", ep, err)
+		}
+		pomdpLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		pomdpScores[ep] = sPOMDP
+		pomdpNets[ep] = sPOMDP.NetContribution
+
+		renderProgress((ep+1)*5, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d Complete (POMDP: $%.0f)", ep+1, cfg.Episodes, sPOMDP.NetContribution), startTime)
+	}
+
+	tCFAvsPFA, _ := pkgmath.ComputePairedTTest(pfaNets, cfaNets)
+	tVFAvsPFA, _ := pkgmath.ComputePairedTTest(pfaNets, vfaNets)
+	tDLAvsPFA, _ := pkgmath.ComputePairedTTest(pfaNets, dlaNets)
+	tPOMDPvsCFA, _ := pkgmath.ComputePairedTTest(cfaNets, pomdpNets)
+
+	meanPFA := meanResult(pfaScores)
+	meanCFA := meanResult(cfaScores)
+	meanVFA := meanResult(vfaScores)
+	meanDLA := meanResult(dlaScores)
+	meanPOMDP := meanResult(pomdpScores)
+
+	pfaMeanLat := meanSlice(pfaLatencies)
+	cfaMeanLat := meanSlice(cfaLatencies)
+	vfaMeanLat := meanSlice(vfaLatencies)
+	dlaMeanLat := meanSlice(dlaLatencies)
+	pomdpMeanLat := meanSlice(pomdpLatencies)
+
+	policies := []FourWayPolicyMetric{
+		{
+			PolicyClass:         "1. PFA",
+			Description:         "Greedy Priority Rule (No LAP)",
+			MeanNetContribution: meanPFA.NetContribution,
+			MeanGrossRevenue:    meanPFA.GrossRevenue,
+			MeanOperatingCost:   meanPFA.OperatingCost,
+			MeanWinRate:         meanPFA.WinRate,
+			MeanLatencyMs:       pfaMeanLat,
+			PercentLiftOverPFA:  0.0,
+		},
+		{
+			PolicyClass:         "2. CFA",
+			Description:         "Parametric Cost Tuning (SPSA LAP)",
+			MeanNetContribution: meanCFA.NetContribution,
+			MeanGrossRevenue:    meanCFA.GrossRevenue,
+			MeanOperatingCost:   meanCFA.OperatingCost,
+			MeanWinRate:         meanCFA.WinRate,
+			MeanLatencyMs:       cfaMeanLat,
+			PercentLiftOverPFA:  ((meanCFA.NetContribution - meanPFA.NetContribution) / math.Abs(meanPFA.NetContribution)) * 100.0,
+		},
+		{
+			PolicyClass:         "3. VFA",
+			Description:         "Piecewise Concave Slopes (CAVE LAP)",
+			MeanNetContribution: meanVFA.NetContribution,
+			MeanGrossRevenue:    meanVFA.GrossRevenue,
+			MeanOperatingCost:   meanVFA.OperatingCost,
+			MeanWinRate:         meanVFA.WinRate,
+			MeanLatencyMs:       vfaMeanLat,
+			PercentLiftOverPFA:  ((meanVFA.NetContribution - meanPFA.NetContribution) / math.Abs(meanPFA.NetContribution)) * 100.0,
+		},
+		{
+			PolicyClass:         "4. DLA",
+			Description:         "Direct Lookahead (2-Epoch Rollouts)",
+			MeanNetContribution: meanDLA.NetContribution,
+			MeanGrossRevenue:    meanDLA.GrossRevenue,
+			MeanOperatingCost:   meanDLA.OperatingCost,
+			MeanWinRate:         meanDLA.WinRate,
+			MeanLatencyMs:       dlaMeanLat,
+			PercentLiftOverPFA:  ((meanDLA.NetContribution - meanPFA.NetContribution) / math.Abs(meanPFA.NetContribution)) * 100.0,
+		},
+		{
+			PolicyClass:         "5. Competitive",
+			Description:         "MOMDP Bayesian Simplex + Pricing",
+			MeanNetContribution: meanPOMDP.NetContribution,
+			MeanGrossRevenue:    meanPOMDP.GrossRevenue,
+			MeanOperatingCost:   meanPOMDP.OperatingCost,
+			MeanWinRate:         meanPOMDP.WinRate,
+			MeanLatencyMs:       pomdpMeanLat,
+			PercentLiftOverPFA:  ((meanPOMDP.NetContribution - meanPFA.NetContribution) / math.Abs(meanPFA.NetContribution)) * 100.0,
+		},
+	}
+
+	return &FourWayReport{
+		Config:               cfg,
+		Policies:             policies,
+		TTestCFAvsPFA:        tCFAvsPFA,
+		TTestVFAvsPFA:        tVFAvsPFA,
+		TTestDLAvsPFA:        tDLAvsPFA,
+		TTestPOMDPvsCFA:      tPOMDPvsCFA,
+		ExecutionDurationSec: time.Since(startTime).Seconds(),
+	}, nil
+}
+
+func meanSlice(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0.0
+	}
+	var sum float64
+	for _, v := range vals {
+		sum += v
+	}
+	return sum / float64(len(vals))
+}
+
+func meanResult(scores []simResult) simResult {
+	if len(scores) == 0 {
+		return simResult{}
+	}
+	var rev, cost, net, win float64
+	for _, s := range scores {
+		rev += s.GrossRevenue
+		cost += s.OperatingCost
+		net += s.NetContribution
+		win += s.WinRate
+	}
+	n := float64(len(scores))
+	return simResult{
+		GrossRevenue:    rev / n,
+		OperatingCost:   cost / n,
+		NetContribution: net / n,
+		WinRate:         win / n,
+	}
+}
+
+// runEpisodePFA runs an episode using a pure greedy PFA heuristic (theta = 0).
+func (r *TournamentRunner) runEpisodePFA(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("pfa: failed creating info state: %w", err)
+	}
+	beliefState := model.NewMonopolisticBelief()
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("pfa: failed creating state: %w", err)
+	}
+
+	pfaParams := policy.DefaultPFAParameters()
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+	pfaPol := policy.NewPFAPolicy[model.Monopolistic](pfaParams, costCfg, feasCfg)
+
+	return r.executeSimulationLoop(ctx, env, state, pfaPol, rng, startEpoch, stepSec, totalEpochs)
+}
+
+// runEpisodeCFA runs an episode using tuned CFA parameters.
+func (r *TournamentRunner) runEpisodeCFA(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("cfa: failed creating info state: %w", err)
+	}
+	beliefState := model.NewMonopolisticBelief()
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("cfa: failed creating state: %w", err)
+	}
+
+	cfaParams := policy.DefaultCFAParameters()
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](cfaParams, costCfg, feasCfg, nil)
+
+	return r.executeSimulationLoop(ctx, env, state, cfaPol, rng, startEpoch, stepSec, totalEpochs)
+}
+
+// runEpisodeVFA runs an episode using Piecewise Linear Concave VFA.
+func (r *TournamentRunner) runEpisodeVFA(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("vfa: failed creating info state: %w", err)
+	}
+	beliefState := model.NewMonopolisticBelief()
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("vfa: failed creating state: %w", err)
+	}
+
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+
+	slopesA, _ := policy.NewRegionSlopes("REG_NYC", []float64{150, 100, 50, 20, 0})
+	slopesB, _ := policy.NewRegionSlopes("REG_CHI", []float64{180, 120, 70, 30, 0})
+	slopesC, _ := policy.NewRegionSlopes("REG_ATL", []float64{140, 90, 40, 10, 0})
+	slopesD, _ := policy.NewRegionSlopes("REG_DAL", []float64{160, 110, 60, 20, 0})
+	slopesE, _ := policy.NewRegionSlopes("REG_PHL", []float64{130, 80, 30, 10, 0})
+	slopesF, _ := policy.NewRegionSlopes("REG_DEN", []float64{170, 115, 65, 25, 0})
+	vfaTable := policy.NewPiecewiseLinearVFATable(map[string]policy.RegionSlopes{
+		"REG_NYC": slopesA,
+		"REG_CHI": slopesB,
+		"REG_ATL": slopesC,
+		"REG_DAL": slopesD,
+		"REG_PHL": slopesE,
+		"REG_DEN": slopesF,
+	})
+	rm := model.NewRegionManager(1.0, nil)
+	vfaPol, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](vfaTable, nil, 0.95, costCfg, feasCfg, rm)
+	if err != nil {
+		return simResult{}, fmt.Errorf("vfa: failed init policy: %w", err)
+	}
+
+	return r.executeSimulationLoop(ctx, env, state, vfaPol, rng, startEpoch, stepSec, totalEpochs)
+}
+
+// runEpisodeDLA runs an episode using Direct Lookahead policy.
+func (r *TournamentRunner) runEpisodeDLA(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("dla: failed creating info state: %w", err)
+	}
+	beliefState := model.NewMonopolisticBelief()
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("dla: failed creating state: %w", err)
+	}
+
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+
+	cfaBase := policy.NewCFAPolicy[model.Monopolistic](policy.DefaultCFAParameters(), costCfg, feasCfg, nil)
+	dlaParams := policy.DefaultDLAParameters()
+	dlaParams.Horizon = 1
+	dlaParams.NumRollouts = 1
+	dlaParams.DiscountFactor = 0.95
+	dlaParams.StepSeconds = stepSec
+	dlaParams.RandomSeed = seed + 101
+	dlaParams.EnableAdaptivePruning = true
+	rm := model.NewRegionManager(1.0, nil)
+	dlaPol, err := policy.NewDLAPolicy[model.Monopolistic](dlaParams, costCfg, feasCfg, cfaBase, nil, rm, nil, nil)
+	if err != nil {
+		return simResult{}, fmt.Errorf("dla: failed init policy: %w", err)
+	}
+
+	return r.executeSimulationLoop(ctx, env, state, dlaPol, rng, startEpoch, stepSec, totalEpochs)
+}
+
+func (r *TournamentRunner) executeSimulationLoop(
+	ctx context.Context,
+	env *MarketEnvironment,
+	initialState *model.State[model.Monopolistic],
+	pol policy.Policy[model.Monopolistic],
+	rng *pkgmath.RNG,
+	startEpoch int64,
+	stepSec int64,
+	totalEpochs int,
+) (simResult, error) {
+	state := initialState
+	totRev := 0.0
+	totCost := 0.0
+	totWon := 0
+	totLost := 0
+
+	for step := 0; step < totalEpochs; step++ {
+		epoch := startEpoch + int64(step)*stepSec
+		nextEpoch := epoch + stepSec
+
+		action, prov, err := pol.Evaluate(ctx, state)
+		if err != nil {
+			return simResult{}, err
+		}
+
+		outcome, _, err := env.Step(epoch, action, state.Resource().Loads())
+		if err != nil {
+			return simResult{}, err
+		}
+
+		wonLoadIDs := make(map[string]bool, len(outcome.WonLoads))
+		for _, l := range outcome.WonLoads {
+			wonLoadIDs[l.ID] = true
+		}
+
+		wonMatches := make([]model.DriverLoadMatch, 0, len(outcome.WonLoads))
+		for _, m := range action.Matches() {
+			if wonLoadIDs[m.LoadID] {
+				wonMatches = append(wonMatches, m)
+			}
+		}
+
+		totWon += len(outcome.WonLoads)
+		totLost += len(outcome.LostLoads)
+		for _, rev := range outcome.CarrierRevenues {
+			totRev += rev
+		}
+		for _, arc := range prov.EvaluatedArcs {
+			if arc.IsAssigned && wonLoadIDs[arc.LoadID] {
+				totCost += arc.CostBreakdown.TotalCost
+			}
+		}
+
+		incomingLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, nextEpoch, rng)
+		nextRes, err := state.Resource().Transition(wonMatches, incomingLoads)
+		if err != nil {
+			return simResult{}, err
+		}
+		nextInfo, err := state.Information().Transition(nextEpoch, 2.50, 3.85, len(incomingLoads))
+		if err != nil {
+			return simResult{}, err
+		}
+		state, err = model.NewState(nextRes, nextInfo, state.Belief())
+		if err != nil {
+			return simResult{}, err
+		}
+	}
+
+	winRate := 0.0
+	if totWon+totLost > 0 {
+		winRate = float64(totWon) / float64(totWon+totLost)
+	}
+
+	return simResult{
+		GrossRevenue:    totRev,
+		OperatingCost:   totCost,
+		NetContribution: totRev - totCost,
+		WonLoads:        totWon,
+		LostLoads:       totLost,
+		WinRate:         winRate,
 	}, nil
 }
 

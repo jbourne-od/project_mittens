@@ -39,14 +39,12 @@ type TelemetryConfig struct {
 // DefaultTelemetryConfig returns standard production defaults.
 func DefaultTelemetryConfig() TelemetryConfig {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
-		endpoint = "localhost:4317"
-	}
+	enableTracing := endpoint != ""
 	return TelemetryConfig{
 		ServiceName:    "project-mittens",
 		ServiceVersion: "1.0.0",
 		Environment:    "production",
-		EnableTracing:  true,
+		EnableTracing:  enableTracing,
 		EnableMetrics:  true,
 		SampleRate:     1.0,
 		OTLPEndpoint:   endpoint,

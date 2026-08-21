@@ -188,11 +188,18 @@ func (p *CFAPolicy[C]) Evaluate(
 			(p.params.ThetaHome-1.0)*costBreakdown.EmptyToHomeCost +
 			(p.params.ThetaDwell-1.0)*costBreakdown.DwellCost)
 
-		// Competitor risk premium (if spot price risk parameter is active)
+		// Competitor risk premium (if spot price risk parameter is active and belief is present)
 		riskPremium := 0.0
 		if p.params.ThetaRisk > 0 {
-			// Risk penalty proportional to empty miles in unfamiliar competitor territory
-			riskPremium = p.params.ThetaRisk * costBreakdown.EmptyCost * 0.1
+			aggWeight := 0.3333333333333333 // default uniform baseline
+			if state.Belief() != nil {
+				dist := state.Belief().Distribution()
+				if pAgg, ok := dist["AGGRESSIVE"]; ok {
+					aggWeight = pAgg
+				}
+			}
+			// Risk penalty proportional to empty repositioning cost under market congestion
+			riskPremium = p.params.ThetaRisk * costBreakdown.EmptyCost * aggWeight
 		}
 
 		totalScore := costBreakdown.NetContribution + cfaAdj - riskPremium

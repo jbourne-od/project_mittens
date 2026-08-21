@@ -20,6 +20,7 @@ import (
 
 	"github.com/optimaldynamics/project-mittens/internal/adapter/simulation"
 	"github.com/optimaldynamics/project-mittens/pkg/logging"
+	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
 )
 
 func main() {
@@ -52,6 +53,13 @@ func main() {
 		Format: logging.FormatText,
 	})
 	slog.SetDefault(logger)
+
+	// Disable background OTLP gRPC export for local standalone CLI execution
+	_, _ = telemetry.InitGlobalProvider(telemetry.TelemetryConfig{
+		ServiceName:   "project-mittens-cli",
+		EnableTracing: false,
+		EnableMetrics: false,
+	})
 
 	runID := fmt.Sprintf("TOURNAMENT_%d", time.Now().Unix())
 	ctx := logging.WithContextData(context.Background(), logging.ContextData{

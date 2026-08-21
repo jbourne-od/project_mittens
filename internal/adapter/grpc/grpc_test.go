@@ -45,11 +45,7 @@ func setupTestGRPCServer(t *testing.T) (mittensv1.OptimizerServiceClient, *pkgjo
 		return lis.Dial()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(
-		ctx,
+	conn, err := grpc.NewClient(
 		"passthrough://bufnet",
 		grpc.WithContextDialer(bufDialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),

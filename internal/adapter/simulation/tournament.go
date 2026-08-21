@@ -1178,7 +1178,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 	policies := []FourWayPolicyMetric{
 		{
 			PolicyClass:         "1. PFA",
-			Description:         "Myopic Direct Contribution",
+			Description:         "Greedy Priority Rule (No LAP)",
 			MeanNetContribution: meanPFA.NetContribution,
 			MeanGrossRevenue:    meanPFA.GrossRevenue,
 			MeanOperatingCost:   meanPFA.OperatingCost,
@@ -1188,7 +1188,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		},
 		{
 			PolicyClass:         "2. CFA",
-			Description:         "Parametric Cost Tuning (SPSA)",
+			Description:         "Parametric Cost Tuning (SPSA LAP)",
 			MeanNetContribution: meanCFA.NetContribution,
 			MeanGrossRevenue:    meanCFA.GrossRevenue,
 			MeanOperatingCost:   meanCFA.OperatingCost,
@@ -1198,7 +1198,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		},
 		{
 			PolicyClass:         "3. VFA",
-			Description:         "Piecewise Linear Concave Slopes",
+			Description:         "Piecewise Concave Slopes (CAVE LAP)",
 			MeanNetContribution: meanVFA.NetContribution,
 			MeanGrossRevenue:    meanVFA.GrossRevenue,
 			MeanOperatingCost:   meanVFA.OperatingCost,
@@ -1208,7 +1208,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		},
 		{
 			PolicyClass:         "4. DLA",
-			Description:         "Direct Lookahead (2-Epoch Horizon)",
+			Description:         "Direct Lookahead (2-Epoch Rollouts)",
 			MeanNetContribution: meanDLA.NetContribution,
 			MeanGrossRevenue:    meanDLA.GrossRevenue,
 			MeanOperatingCost:   meanDLA.OperatingCost,
@@ -1218,7 +1218,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		},
 		{
 			PolicyClass:         "5. Competitive",
-			Description:         "MOMDP Bayesian Belief Simplex",
+			Description:         "MOMDP Bayesian Simplex + Pricing",
 			MeanNetContribution: meanPOMDP.NetContribution,
 			MeanGrossRevenue:    meanPOMDP.GrossRevenue,
 			MeanOperatingCost:   meanPOMDP.OperatingCost,
@@ -1295,17 +1295,12 @@ func (r *TournamentRunner) runEpisodePFA(ctx context.Context, seed uint64) (simR
 		return simResult{}, fmt.Errorf("pfa: failed creating state: %w", err)
 	}
 
-	cfaParams := policy.CFAParameters{
-		ThetaEmpty: 0.0,
-		ThetaHome:  0.0,
-		ThetaDwell: 0.0,
-		ThetaRisk:  0.0,
-	}
+	pfaParams := policy.DefaultPFAParameters()
 	costCfg := model.DefaultCostConfig()
 	costCfg.EmptyToHomeRate = 0.0
 	feasCfg := model.DefaultFeasibilityConfig()
 	feasCfg.MaxDeadheadMiles = 800.0
-	pfaPol := policy.NewCFAPolicy[model.Monopolistic](cfaParams, costCfg, feasCfg, nil)
+	pfaPol := policy.NewPFAPolicy[model.Monopolistic](pfaParams, costCfg, feasCfg)
 
 	return r.executeSimulationLoop(ctx, env, state, pfaPol, rng, startEpoch, stepSec, totalEpochs)
 }

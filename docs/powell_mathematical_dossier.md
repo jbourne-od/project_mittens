@@ -304,7 +304,7 @@ $$\Delta_{I \mid \text{comp}} - \Delta_{I \mid \text{legacy}} = \$2,175.89 - (-\
 
 ---
 
-### 4.4 Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes)
+## 4.4 Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes)
 
 > **Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes):**  
 > *Competitive market information and pricing/dispatch flexibility exhibit positive treatment-lattice complementarity across all tested operating regimes. The magnitude of this complementarity is governed jointly by market density, absolute scale/thickness, and horizon duration:*
@@ -313,7 +313,7 @@ $$\Delta_{I \mid \text{comp}} - \Delta_{I \mid \text{legacy}} = \$2,175.89 - (-\
 #### Evidence Hierarchy & Experimental Design:
 We organize our empirical findings into a two-tier research hierarchy:
 1. **Confirmatory High-Powered Experiments ($N = 500$ to $N = 1,000$ paired episodes):** Establish tightly estimated baseline benchmarks and primary regime contrasts.
-2. **Exploratory Continuous Response Surfaces ($N = 100$ paired episodes per grid cell, 18 parameter points):** Map the underlying functional topology across tender flow $\lambda \in [10, 30]$, fleet size $K \in [6, 20]$, and horizon $H \in [3, 30]$ days, testing paired stepwise finite differences $\delta_{\theta, i} = D_i(\theta_{j+1}) - D_i(\theta_j)$ with exact Student-$t$ quantiles ($df = 99$).
+2. **Exploratory Continuous Response Surfaces ($N = 100$ paired episodes per grid cell, 18 parameter points):** Map the underlying response-surface shapes across tender flow $\lambda \in [10, 30]$, fleet size $K \in [6, 20]$, and horizon $H \in [3, 30]$ days, testing paired stepwise finite differences $\delta_{\theta, i} = D_i(\theta_{j+1}) - D_i(\theta_j)$ with exact Student-$t$ quantiles ($df = 99$).
 
 #### Confirmatory Grid Experiments ($N = 500$ to $N = 1,000$ Paired Episodes):
 
@@ -329,12 +329,16 @@ We organize our empirical findings into a two-tier research hierarchy:
    The response curves empirically refute the naive 1D hypothesis that complementarity depends solely on the ratio $\lambda/K$.
    * At identical scarcity ratio $2.5 : 1$: an absolute scale of $(25\text{ loads}, 10\text{ trucks})$ yields $\Delta_{\text{int}} = +\$4,390.81$ (+$4,053.99$ at $N=500$), whereas $(15\text{ loads}, 6\text{ trucks})$ yields only $\Delta_{\text{int}} = +\$2,478.24$.
    * At identical scarcity ratio $1.0 : 1$: an absolute scale of $(10\text{ loads}, 10\text{ trucks})$ yields $\Delta_{\text{int}} = +\$1,311.72$, whereas $(15\text{ loads}, 15\text{ trucks})$ yields $\Delta_{\text{int}} = +\$2,056.78$ (+$2,010.79$ at $N=500$).
-   * Absolute scale matters in addition to scarcity ratio. This is consistent with thicker markets offering richer combinatorial assignment options, expanding the option value of pricing flexibility and competitor intelligence. To isolate scale conditional on scarcity, future work will evaluate constant-ratio scale rays: $(5,5), (10,10), (15,15), (20,20)$ and $(5,2), (10,4), (15,6), (20,8), (25,10)$.
-2. **Transience and Saturation of Horizon Effects:**  
-   Across extended horizons ($H = 3 \to 30$ days), cumulative blind mispricing damage ($\Delta_{A \mid \text{blind}} = -\$837 \to -\$2,105 \to -\$2,246 \to -\$2,272$) and cumulative informed value of information ($\Delta_{I \mid \text{comp}} = +\$2,447 \to +\$2,629 \to +\$2,632 \to +\$2,645$) both saturate after 14–21 days.  
-   *Working Hypothesis:* The observed saturation is consistent with an initial learning/transient-allocation regime followed by a stationary filtering and dispatch regime in which incremental information rents are small. At short horizons ($H=3$ days), blind competitive pricing yields a short-run positive value of action before longer-horizon degradation emerges, while the informed policy extracts immediate gains. (Future telemetry logging epoch-by-epoch posterior entropy $H(b_t)$, calibration, policy action divergence, and driver spatial distributions will directly test this causal channel).
-3. **Exploratory Finite Differences & Scientific Humility:**  
-   Across the $N=100$ exploratory sweep with exact Student-$t$ intervals ($df=99, t_{\text{crit}} \approx 1.984$), only $\lambda: 18 \to 20$ reaches conventional statistical significance ($p = 0.0119$), while for capacity $K$, no adjacent step is distinguishable from zero. The interaction levels vary materially across operating regimes, with broad evidence of greater complementarity in denser markets, but $N=100$ exploratory finite differences are too noisy to establish a monotone local response. This reinforces our two-tier research hierarchy.
+   * Absolute scale matters in addition to scarcity ratio. This is consistent with thicker markets offering richer combinatorial assignment options, expanding the option value of pricing flexibility and competitor intelligence.
+2. **Dynamic Transience, Sign Reversal, and Saturation of Horizon Effects:**  
+   * At short horizon ($H = 3\text{ days}$), blind competitive pricing yields a positive value of action ($\Delta_{A \mid \text{blind}} = +\$1,349.48$, $+\$449.83/\text{day}$).
+   * Between $3$ and $7$ days, this action effect reverses sign ($\Delta_{A \mid \text{blind}} = -\$837.08$ at $7\text{d}$), and its cumulative disadvantage then plateaus over longer horizons ($-\$837 \to -\$2,105 \to -\$2,246 \to -\$2,272$).
+   * Meanwhile, the informed competitive premium ($\Delta_{I \mid \text{comp}}$) expands rapidly from $+\$1,852.37$ ($3\text{d}$) to $+\$2,447.22$ ($7\text{d}$) and saturates at $\sim +\$2,645$ ($+\$2,629 \to +\$2,632 \to +\$2,645$).
+   * *Economic Structure:* **Competitive flexibility is initially beneficial when blind, but reverses sign between 3 and 7 days and its cumulative disadvantage then saturates.** In the short horizon, extra flexibility itself helps; over longer horizons, uninformed flexibility becomes harmful; market information largely offsets that longer-run degradation, with most of its cumulative surplus realized relatively early.
+   * *Working Hypothesis:* The observed saturation is consistent with an initial learning/transient-allocation regime followed by a stationary filtering and dispatch regime in which incremental information rents are small. (Future telemetry logging epoch-by-epoch posterior entropy $H(b_t)$, calibration, policy action divergence, and driver spatial distributions will directly test this causal channel).
+3. **Exploratory Finite Differences & Multiple-Testing Discipline:**  
+   Across the $N=100$ exploratory sweep with exact Student-$t$ intervals ($df=99, t_{\text{crit}} \approx 1.984$), only the $\lambda: 18 \to 20$ transition is nominally significant at the unadjusted 5% level ($p = 0.0119$). However, across the family of six adjacent density tests, Bonferroni correction yields $\alpha^* = 0.05 / 6 \approx 0.00833$, under which no individual adjacent step remains statistically significant (and none survives Benjamini-Hochberg FDR control). For capacity $K$, no adjacent step is distinguishable from zero even unadjusted ($p \in [0.32, 0.96]$).  
+   *Methodological Takeaway:* **Response surfaces suggest shape; they do not establish local derivatives.** The interaction levels vary materially across operating regimes, with broad evidence of greater complementarity in denser markets, but $N=100$ exploratory finite differences are too noisy to assert monotone local slopes $\frac{\partial \Delta}{\partial \lambda} > 0$ or $\frac{\partial \Delta}{\partial K} < 0$. This reinforces our two-tier research hierarchy: broad sweeps map response-surface shapes, while high-powered confirmatory runs ($N \ge 500$) establish definitive inference on primary operating points.
 
 ---
 

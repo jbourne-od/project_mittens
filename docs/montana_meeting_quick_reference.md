@@ -42,7 +42,7 @@ From the repository root (`/Users/jacob/Development/od/project_mittens`):
 * **Key Talking Point:** Point out **Empirical Proposition 4**:
   1. *Scarcity Ratio Insufficiency / Scale Effect:* Equal scarcity ratios yield different interactions (at $2.5:1$, absolute scale $(25, 10) \implies +\$4,391$ vs $(15, 6) \implies +\$2,478$), proving scale/thickness matters in addition to the ratio $\lambda/K$.
   2. *Transient Saturation:* Cumulative blind damage ($-\$837 \to -\$2,272$) and informed premium ($+\$2,447 \to +\$2,645$) both saturate after 14–21 days, consistent with a transient learning/allocation phase giving way to stationary filtering and dispatch.
-  3. *Evidence Hierarchy:* Confirmatory grid ($N=500$) establishes $+\$4,054$ ($+28.1\%$ lift) at $2.5:1$, while continuous curves ($N=100$) map shape and test paired finite differences ($\delta_{\theta, i}$) with exact Student-$t$ CIs.
+  3. *Evidence Hierarchy:* Confirmatory grid ($N=500$) establishes $+\$4,054$ ($+28.1\%$ lift) at $2.5:1$, while continuous curves ($N=100$) map response-surface shapes and test paired finite differences ($\delta_{\theta, i}$) with exact Student-$t$ CIs.
 
 ### Demo 4: Monopolistic Reduction vs. Competitive Superiority
 ```bash

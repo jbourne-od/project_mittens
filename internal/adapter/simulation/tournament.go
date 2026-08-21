@@ -142,6 +142,51 @@ type TripartiteReport struct {
 	ExecutionDurationSec  float64                   `json:"execution_duration_sec"`
 }
 
+// FourWayPolicyMetric captures average metrics for a single policy class across tournament episodes.
+type FourWayPolicyMetric struct {
+	PolicyClass         string  `json:"policy_class"`
+	Description         string  `json:"description"`
+	MeanNetContribution float64 `json:"mean_net_contribution"`
+	MeanGrossRevenue    float64 `json:"mean_gross_revenue"`
+	MeanOperatingCost   float64 `json:"mean_operating_cost"`
+	MeanWinRate         float64 `json:"mean_win_rate"`
+	MeanLatencyMs       float64 `json:"mean_latency_ms"`
+	PercentLiftOverPFA  float64 `json:"percent_lift_over_pfa"`
+}
+
+// FourWayReport encapsulates head-to-head empirical comparison across the four universal policy classes.
+type FourWayReport struct {
+	Config               TournamentConfig          `json:"config"`
+	Policies             []FourWayPolicyMetric     `json:"policies"`
+	TTestCFAvsPFA        pkgmath.PairedTTestResult `json:"t_test_cfa_vs_pfa"`
+	TTestVFAvsPFA        pkgmath.PairedTTestResult `json:"t_test_vfa_vs_pfa"`
+	TTestDLAvsPFA        pkgmath.PairedTTestResult `json:"t_test_dla_vs_pfa"`
+	TTestPOMDPvsCFA      pkgmath.PairedTTestResult `json:"t_test_pomdp_vs_cfa"`
+	ExecutionDurationSec float64                   `json:"execution_duration_sec"`
+}
+
+// SummaryString formats the 4-policy benchmark scorecard.
+func (r FourWayReport) SummaryString() string {
+	out := "================================================================================\n" +
+		"       POWELL 4-POLICY BENCHMARK: PFA vs CFA vs VFA vs DLA vs POMDP             \n" +
+		"================================================================================\n" +
+		fmt.Sprintf(" %-16s | %-12s | %-12s | %-10s | %-10s | %-18s\n",
+			"Policy Class", "Net Margin", "Lift vs PFA", "Win Rate", "Latency", "Description") +
+		"--------------------------------------------------------------------------------\n"
+	for _, p := range r.Policies {
+		out += fmt.Sprintf(" %-16s | $%11.2f | %+11.2f%% | %9.2f%% | %7.2f ms | %-18s\n",
+			p.PolicyClass,
+			p.MeanNetContribution,
+			p.PercentLiftOverPFA,
+			p.MeanWinRate*100.0,
+			p.MeanLatencyMs,
+			p.Description,
+		)
+	}
+	out += "================================================================================\n"
+	return out
+}
+
 // TournamentReport encapsulates aggregate statistical findings and hypothesis test results.
 type TournamentReport struct {
 	Config                   TournamentConfig          `json:"config"`
@@ -1023,6 +1068,468 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 		TTestV10VsV00:        tV10VsV00,
 		TTestV01VsV00:        tV01VsV00,
 		ExecutionDurationSec: time.Since(startTime).Seconds(),
+	}, nil
+}
+
+// Run4Way executes a comprehensive 5-way benchmark evaluating PFA, CFA, PiecewiseVFA, DLA, and Competitive POMDP
+// across identical stochastic problem instances to produce the canonical Powell policy comparison.
+func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) {
+	startTime := time.Now()
+	cfg := r.cfg
+	if cfg.Episodes < 2 {
+		cfg.Episodes = 2
+	}
+
+	pfaScores := make([]simResult, cfg.Episodes)
+	cfaScores := make([]simResult, cfg.Episodes)
+	vfaScores := make([]simResult, cfg.Episodes)
+	dlaScores := make([]simResult, cfg.Episodes)
+	pomdpScores := make([]simResult, cfg.Episodes)
+
+	pfaNets := make([]float64, cfg.Episodes)
+	cfaNets := make([]float64, cfg.Episodes)
+	vfaNets := make([]float64, cfg.Episodes)
+	dlaNets := make([]float64, cfg.Episodes)
+	pomdpNets := make([]float64, cfg.Episodes)
+
+	pfaLatencies := make([]float64, cfg.Episodes)
+	cfaLatencies := make([]float64, cfg.Episodes)
+	vfaLatencies := make([]float64, cfg.Episodes)
+	dlaLatencies := make([]float64, cfg.Episodes)
+	pomdpLatencies := make([]float64, cfg.Episodes)
+
+	for ep := 0; ep < cfg.Episodes; ep++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		epSeed := cfg.BaseSeed + uint64(ep)*7919
+
+		// 1. PFA (Greedy Direct Contribution)
+		t0 := time.Now()
+		sPFA, err := r.runEpisodePFA(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d PFA failed: %w", ep, err)
+		}
+		pfaLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		pfaScores[ep] = sPFA
+		pfaNets[ep] = sPFA.NetContribution
+
+		// 2. CFA (Parametric Cost Function Approximation)
+		t0 = time.Now()
+		sCFA, err := r.runEpisodeCFA(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d CFA failed: %w", ep, err)
+		}
+		cfaLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		cfaScores[ep] = sCFA
+		cfaNets[ep] = sCFA.NetContribution
+
+		// 3. Piecewise VFA (Downstream Marginal Slopes with CAVE)
+		t0 = time.Now()
+		sVFA, err := r.runEpisodeVFA(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d VFA failed: %w", ep, err)
+		}
+		vfaLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		vfaScores[ep] = sVFA
+		vfaNets[ep] = sVFA.NetContribution
+
+		// 4. DLA (Direct Lookahead Approximation)
+		t0 = time.Now()
+		sDLA, err := r.runEpisodeDLA(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d DLA failed: %w", ep, err)
+		}
+		dlaLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		dlaScores[ep] = sDLA
+		dlaNets[ep] = sDLA.NetContribution
+
+		// 5. Competitive POMDP (Bayesian Belief Simplex + Dynamic Pricing)
+		t0 = time.Now()
+		sPOMDP, err := r.runEpisodeN1(ctx, epSeed)
+		if err != nil {
+			return nil, fmt.Errorf("4way: episode %d POMDP failed: %w", ep, err)
+		}
+		pomdpLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
+		pomdpScores[ep] = sPOMDP
+		pomdpNets[ep] = sPOMDP.NetContribution
+	}
+
+	tCFAvsPFA, _ := pkgmath.ComputePairedTTest(pfaNets, cfaNets)
+	tVFAvsPFA, _ := pkgmath.ComputePairedTTest(pfaNets, vfaNets)
+	tDLAvsPFA, _ := pkgmath.ComputePairedTTest(pfaNets, dlaNets)
+	tPOMDPvsCFA, _ := pkgmath.ComputePairedTTest(cfaNets, pomdpNets)
+
+	meanPFA := meanResult(pfaScores)
+	meanCFA := meanResult(cfaScores)
+	meanVFA := meanResult(vfaScores)
+	meanDLA := meanResult(dlaScores)
+	meanPOMDP := meanResult(pomdpScores)
+
+	pfaMeanLat := meanSlice(pfaLatencies)
+	cfaMeanLat := meanSlice(cfaLatencies)
+	vfaMeanLat := meanSlice(vfaLatencies)
+	dlaMeanLat := meanSlice(dlaLatencies)
+	pomdpMeanLat := meanSlice(pomdpLatencies)
+
+	policies := []FourWayPolicyMetric{
+		{
+			PolicyClass:         "1. PFA",
+			Description:         "Greedy Direct Dispatch",
+			MeanNetContribution: meanPFA.NetContribution,
+			MeanGrossRevenue:    meanPFA.GrossRevenue,
+			MeanOperatingCost:   meanPFA.OperatingCost,
+			MeanWinRate:         meanPFA.WinRate,
+			MeanLatencyMs:       pfaMeanLat,
+			PercentLiftOverPFA:  0.0,
+		},
+		{
+			PolicyClass:         "2. CFA",
+			Description:         "Parametric Cost Tuning (SPSA)",
+			MeanNetContribution: meanCFA.NetContribution,
+			MeanGrossRevenue:    meanCFA.GrossRevenue,
+			MeanOperatingCost:   meanCFA.OperatingCost,
+			MeanWinRate:         meanCFA.WinRate,
+			MeanLatencyMs:       cfaMeanLat,
+			PercentLiftOverPFA:  ((meanCFA.NetContribution - meanPFA.NetContribution) / math.Abs(meanPFA.NetContribution)) * 100.0,
+		},
+		{
+			PolicyClass:         "3. VFA",
+			Description:         "Piecewise Linear Concave Slopes",
+			MeanNetContribution: meanVFA.NetContribution,
+			MeanGrossRevenue:    meanVFA.GrossRevenue,
+			MeanOperatingCost:   meanVFA.OperatingCost,
+			MeanWinRate:         meanVFA.WinRate,
+			MeanLatencyMs:       vfaMeanLat,
+			PercentLiftOverPFA:  ((meanVFA.NetContribution - meanPFA.NetContribution) / math.Abs(meanPFA.NetContribution)) * 100.0,
+		},
+		{
+			PolicyClass:         "4. DLA",
+			Description:         "Direct Lookahead (2-Epoch Horizon)",
+			MeanNetContribution: meanDLA.NetContribution,
+			MeanGrossRevenue:    meanDLA.GrossRevenue,
+			MeanOperatingCost:   meanDLA.OperatingCost,
+			MeanWinRate:         meanDLA.WinRate,
+			MeanLatencyMs:       dlaMeanLat,
+			PercentLiftOverPFA:  ((meanDLA.NetContribution - meanPFA.NetContribution) / math.Abs(meanPFA.NetContribution)) * 100.0,
+		},
+		{
+			PolicyClass:         "5. Competitive",
+			Description:         "MOMDP Bayesian Belief Simplex",
+			MeanNetContribution: meanPOMDP.NetContribution,
+			MeanGrossRevenue:    meanPOMDP.GrossRevenue,
+			MeanOperatingCost:   meanPOMDP.OperatingCost,
+			MeanWinRate:         meanPOMDP.WinRate,
+			MeanLatencyMs:       pomdpMeanLat,
+			PercentLiftOverPFA:  ((meanPOMDP.NetContribution - meanPFA.NetContribution) / math.Abs(meanPFA.NetContribution)) * 100.0,
+		},
+	}
+
+	return &FourWayReport{
+		Config:               cfg,
+		Policies:             policies,
+		TTestCFAvsPFA:        tCFAvsPFA,
+		TTestVFAvsPFA:        tVFAvsPFA,
+		TTestDLAvsPFA:        tDLAvsPFA,
+		TTestPOMDPvsCFA:      tPOMDPvsCFA,
+		ExecutionDurationSec: time.Since(startTime).Seconds(),
+	}, nil
+}
+
+func meanSlice(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0.0
+	}
+	var sum float64
+	for _, v := range vals {
+		sum += v
+	}
+	return sum / float64(len(vals))
+}
+
+func meanResult(scores []simResult) simResult {
+	if len(scores) == 0 {
+		return simResult{}
+	}
+	var rev, cost, net, win float64
+	for _, s := range scores {
+		rev += s.GrossRevenue
+		cost += s.OperatingCost
+		net += s.NetContribution
+		win += s.WinRate
+	}
+	n := float64(len(scores))
+	return simResult{
+		GrossRevenue:    rev / n,
+		OperatingCost:   cost / n,
+		NetContribution: net / n,
+		WinRate:         win / n,
+	}
+}
+
+// runEpisodePFA runs an episode using a pure greedy PFA heuristic (theta = 0).
+func (r *TournamentRunner) runEpisodePFA(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("pfa: failed creating info state: %w", err)
+	}
+	beliefState := model.NewMonopolisticBelief()
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("pfa: failed creating state: %w", err)
+	}
+
+	cfaParams := policy.CFAParameters{
+		ThetaEmpty: 0.0,
+		ThetaHome:  0.0,
+		ThetaDwell: 0.0,
+		ThetaRisk:  0.0,
+	}
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.0
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+	pfaPol := policy.NewCFAPolicy[model.Monopolistic](cfaParams, costCfg, feasCfg, nil)
+
+	return r.executeSimulationLoop(ctx, env, state, pfaPol, rng, startEpoch, stepSec, totalEpochs)
+}
+
+// runEpisodeCFA runs an episode using tuned CFA parameters.
+func (r *TournamentRunner) runEpisodeCFA(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("cfa: failed creating info state: %w", err)
+	}
+	beliefState := model.NewMonopolisticBelief()
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("cfa: failed creating state: %w", err)
+	}
+
+	cfaParams := policy.CFAParameters{
+		ThetaEmpty: 1.15,
+		ThetaHome:  0.20,
+		ThetaDwell: 0.85,
+		ThetaRisk:  0.0,
+	}
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](cfaParams, costCfg, feasCfg, nil)
+
+	return r.executeSimulationLoop(ctx, env, state, cfaPol, rng, startEpoch, stepSec, totalEpochs)
+}
+
+// runEpisodeVFA runs an episode using Piecewise Linear Concave VFA.
+func (r *TournamentRunner) runEpisodeVFA(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("vfa: failed creating info state: %w", err)
+	}
+	beliefState := model.NewMonopolisticBelief()
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("vfa: failed creating state: %w", err)
+	}
+
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+
+	slopesA, _ := policy.NewRegionSlopes("REG_NYC", []float64{150, 100, 50, 20, 0})
+	slopesB, _ := policy.NewRegionSlopes("REG_CHI", []float64{180, 120, 70, 30, 0})
+	slopesC, _ := policy.NewRegionSlopes("REG_ATL", []float64{140, 90, 40, 10, 0})
+	slopesD, _ := policy.NewRegionSlopes("REG_DAL", []float64{160, 110, 60, 20, 0})
+	slopesE, _ := policy.NewRegionSlopes("REG_PHL", []float64{130, 80, 30, 10, 0})
+	slopesF, _ := policy.NewRegionSlopes("REG_DEN", []float64{170, 115, 65, 25, 0})
+	vfaTable := policy.NewPiecewiseLinearVFATable(map[string]policy.RegionSlopes{
+		"REG_NYC": slopesA,
+		"REG_CHI": slopesB,
+		"REG_ATL": slopesC,
+		"REG_DAL": slopesD,
+		"REG_PHL": slopesE,
+		"REG_DEN": slopesF,
+	})
+	rm := model.NewRegionManager(1.0, nil)
+	vfaPol, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](vfaTable, nil, 0.95, costCfg, feasCfg, rm)
+	if err != nil {
+		return simResult{}, fmt.Errorf("vfa: failed init policy: %w", err)
+	}
+
+	return r.executeSimulationLoop(ctx, env, state, vfaPol, rng, startEpoch, stepSec, totalEpochs)
+}
+
+// runEpisodeDLA runs an episode using Direct Lookahead policy.
+func (r *TournamentRunner) runEpisodeDLA(ctx context.Context, seed uint64) (simResult, error) {
+	env, err := NewMarketEnvironment(r.cfg.Market, seed)
+	if err != nil {
+		return simResult{}, err
+	}
+
+	rng := pkgmath.NewRNG(seed + 1)
+	startEpoch := int64(1700000000)
+	stepSec := int64(r.cfg.DecisionStepHours * 3600)
+	totalEpochs := (r.cfg.HorizonDays * 24) / r.cfg.DecisionStepHours
+
+	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
+	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
+	resState := model.NewResourceState(initialDrivers, initialLoads)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("dla: failed creating info state: %w", err)
+	}
+	beliefState := model.NewMonopolisticBelief()
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("dla: failed creating state: %w", err)
+	}
+
+	costCfg := model.DefaultCostConfig()
+	costCfg.EmptyToHomeRate = 0.20
+	feasCfg := model.DefaultFeasibilityConfig()
+	feasCfg.MaxDeadheadMiles = 800.0
+
+	cfaBase := policy.NewCFAPolicy[model.Monopolistic](policy.DefaultCFAParameters(), costCfg, feasCfg, nil)
+	dlaParams := policy.DefaultDLAParameters()
+	dlaParams.Horizon = 2
+	dlaParams.NumRollouts = 1
+	dlaParams.DiscountFactor = 0.95
+	dlaParams.StepSeconds = stepSec
+	dlaParams.RandomSeed = seed + 101
+	dlaParams.EnableAdaptivePruning = false
+	rm := model.NewRegionManager(1.0, nil)
+	dlaPol, err := policy.NewDLAPolicy[model.Monopolistic](dlaParams, costCfg, feasCfg, cfaBase, nil, rm, nil, nil)
+	if err != nil {
+		return simResult{}, fmt.Errorf("dla: failed init policy: %w", err)
+	}
+
+	return r.executeSimulationLoop(ctx, env, state, dlaPol, rng, startEpoch, stepSec, totalEpochs)
+}
+
+func (r *TournamentRunner) executeSimulationLoop(
+	ctx context.Context,
+	env *MarketEnvironment,
+	initialState *model.State[model.Monopolistic],
+	pol policy.Policy[model.Monopolistic],
+	rng *pkgmath.RNG,
+	startEpoch int64,
+	stepSec int64,
+	totalEpochs int,
+) (simResult, error) {
+	state := initialState
+	totRev := 0.0
+	totCost := 0.0
+	totWon := 0
+	totLost := 0
+
+	for step := 0; step < totalEpochs; step++ {
+		epoch := startEpoch + int64(step)*stepSec
+		nextEpoch := epoch + stepSec
+
+		action, prov, err := pol.Evaluate(ctx, state)
+		if err != nil {
+			return simResult{}, err
+		}
+
+		outcome, _, err := env.Step(epoch, action, state.Resource().Loads())
+		if err != nil {
+			return simResult{}, err
+		}
+
+		wonLoadIDs := make(map[string]bool, len(outcome.WonLoads))
+		for _, l := range outcome.WonLoads {
+			wonLoadIDs[l.ID] = true
+		}
+
+		wonMatches := make([]model.DriverLoadMatch, 0, len(outcome.WonLoads))
+		for _, m := range action.Matches() {
+			if wonLoadIDs[m.LoadID] {
+				wonMatches = append(wonMatches, m)
+			}
+		}
+
+		totWon += len(outcome.WonLoads)
+		totLost += len(outcome.LostLoads)
+		for _, rev := range outcome.CarrierRevenues {
+			totRev += rev
+		}
+		for _, arc := range prov.EvaluatedArcs {
+			if arc.IsAssigned && wonLoadIDs[arc.LoadID] {
+				totCost += arc.CostBreakdown.TotalCost
+			}
+		}
+
+		incomingLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, nextEpoch, rng)
+		nextRes, err := state.Resource().Transition(wonMatches, incomingLoads)
+		if err != nil {
+			return simResult{}, err
+		}
+		nextInfo, err := state.Information().Transition(nextEpoch, 2.50, 3.85, len(incomingLoads))
+		if err != nil {
+			return simResult{}, err
+		}
+		state, err = model.NewState(nextRes, nextInfo, state.Belief())
+		if err != nil {
+			return simResult{}, err
+		}
+	}
+
+	winRate := 0.0
+	if totWon+totLost > 0 {
+		winRate = float64(totWon) / float64(totWon+totLost)
+	}
+
+	return simResult{
+		GrossRevenue:    totRev,
+		OperatingCost:   totCost,
+		NetContribution: totRev - totCost,
+		WonLoads:        totWon,
+		LostLoads:       totLost,
+		WinRate:         winRate,
 	}, nil
 }
 

@@ -198,6 +198,9 @@ func (p *DLAPolicy[C]) Evaluate(
 	}
 
 	epoch := drivers[0].AvailableEpoch
+	if state.Information() != nil && state.Information().Epoch() > 0 {
+		epoch = state.Information().Epoch()
+	}
 
 	// 1. Generate feasible first-stage candidate arcs
 	filterCfg := feasibility.FilterConfig{

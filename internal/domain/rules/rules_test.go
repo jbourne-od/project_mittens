@@ -181,16 +181,64 @@ func TestRules_CostMultipliers(t *testing.T) {
 
 	// Over 1000 miles
 	ctxLong := rules.BuildEvaluationContext(driver, load, 50.0, 1200.0)
-	resLong, _ := reg.Evaluate(context.Background(), ctxLong)
+	resLong, err := reg.Evaluate(context.Background(), ctxLong)
+	if err != nil {
+		t.Fatalf("Evaluate failed for long haul: %v", err)
+	}
 	if resLong.LoadedRateMultiplier != 1.20 {
 		t.Errorf("expected 1.20 multiplier, got %f", resLong.LoadedRateMultiplier)
 	}
 
 	// Under 1000 miles
 	ctxShort := rules.BuildEvaluationContext(driver, load, 50.0, 800.0)
-	resShort, _ := reg.Evaluate(context.Background(), ctxShort)
+	resShort, err := reg.Evaluate(context.Background(), ctxShort)
+	if err != nil {
+		t.Fatalf("Evaluate failed for short haul: %v", err)
+	}
 	if resShort.LoadedRateMultiplier != 1.0 {
 		t.Errorf("expected 1.0 multiplier, got %f", resShort.LoadedRateMultiplier)
+	}
+}
+
+func TestRules_EvaluationFailClosedErrors(t *testing.T) {
+	// Rule with condition that causes runtime error (cannot convert string to int)
+	ruleDefs := []rules.Rule{
+		{
+			ID:           "RULE-ERR-COND",
+			ConditionCEL: "int(driver.equipment_type) > 10",
+		},
+	}
+	reg, err := rules.NewRuleRegistry(ruleDefs, nil)
+	if err != nil {
+		t.Fatalf("NewRuleRegistry failed: %v", err)
+	}
+
+	driver := model.Driver{ID: "D-01", Equipment: model.Equipment{Type: model.EquipDryVan}}
+	load := model.Load{ID: "L-01"}
+	ctxMap := rules.BuildEvaluationContext(driver, load, 50.0, 100.0)
+
+	_, evalErr := reg.Evaluate(context.Background(), ctxMap)
+	if evalErr == nil {
+		t.Errorf("expected runtime evaluation error on invalid type conversion in condition, got nil")
+	}
+
+	// Rule with value that causes runtime error (division by zero in int arithmetic)
+	valRuleDefs := []rules.Rule{
+		{
+			ID:           "RULE-DIV-BY-ZERO-VAL",
+			Target:       rules.TargetBonus,
+			Operation:    rules.OpAdd,
+			ConditionCEL: "arc.loaded_miles > 50.0",
+			ValueCEL:     "100 / (int(arc.deadhead_miles) - 50)",
+		},
+	}
+	valReg, err := rules.NewRuleRegistry(valRuleDefs, nil)
+	if err != nil {
+		t.Fatalf("NewRuleRegistry failed: %v", err)
+	}
+	_, valEvalErr := valReg.Evaluate(context.Background(), ctxMap)
+	if valEvalErr == nil {
+		t.Errorf("expected runtime evaluation error on division by zero in value, got nil")
 	}
 }
 
@@ -204,6 +252,20 @@ func TestRules_CompileValidationErrors(t *testing.T) {
 	}
 	if _, err := rules.NewRuleRegistry(badSyntax, nil); err == nil {
 		t.Errorf("expected compile error on invalid CEL syntax, got nil")
+	}
+
+	// 2. Unsupported return type for ValueCEL (e.g. list)
+	unsupportedValDefs := []rules.Rule{
+		{
+			ID:           "RULE-UNSUPPORTED-TYPE",
+			Target:       rules.TargetBonus,
+			Operation:    rules.OpAdd,
+			ConditionCEL: "true",
+			ValueCEL:     "[1, 2, 3]",
+		},
+	}
+	if _, err := rules.NewRuleRegistry(unsupportedValDefs, nil); err == nil {
+		t.Errorf("expected compile error for unsupported ValueCEL type, got nil")
 	}
 
 	// 2. Non-boolean condition return type

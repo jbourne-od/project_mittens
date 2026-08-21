@@ -9,6 +9,7 @@ package dispatch
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
@@ -73,7 +74,10 @@ func (r *RelayDispatchRunner) SynthesizeRelayBatch(
 
 	if r.relaySynthesizer != nil {
 		exchanges, err := r.relaySynthesizer.SynthesizeRelays(ctx, drivers, allLoads, minRelayHaulMiles)
-		if err == nil && len(exchanges) > 0 {
+		if err != nil {
+			return nil, fmt.Errorf("dispatch: relay synthesis failed: %w", err)
+		}
+		if len(exchanges) > 0 {
 			relayExchanges = exchanges
 			for _, ex := range exchanges {
 				assignedRelayDrivers[ex.InboundSegment.DriverID] = true

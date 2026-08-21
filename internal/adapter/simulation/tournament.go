@@ -274,9 +274,15 @@ func (r *TournamentRunner) runEpisodeN0(ctx context.Context, seed uint64) (simRe
 	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
 	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
 	resState := model.NewResourceState(initialDrivers, initialLoads)
-	infoState, _ := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating info state: %w", err)
+	}
 	beliefState := model.NewMonopolisticBelief()
-	state, _ := model.NewState(resState, infoState, beliefState)
+	state, err := model.NewState(resState, infoState, beliefState)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating state: %w", err)
+	}
 
 	// Baseline CFA Policy with zero competitor risk adjustment
 	cfaParams := policy.CFAParameters{
@@ -382,24 +388,36 @@ func (r *TournamentRunner) runEpisodeN1(ctx context.Context, seed uint64) (simRe
 	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
 	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
 	resState := model.NewResourceState(initialDrivers, initialLoads)
-	infoState, _ := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating info state: %w", err)
+	}
 
 	// N=1 Aggregated Market Belief over 3 competitor postures: [Aggressive, Moderate, Passive]
 	marketScale := model.AggregatedMarket{LatentStates: []string{"AGGRESSIVE", "MODERATE", "PASSIVE"}}
-	initBelief, _ := model.NewBelief[model.AggregatedMarket](
+	initBelief, err := model.NewBelief[model.AggregatedMarket](
 		marketScale,
 		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
 		[]float64{1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0},
 	)
-	state, _ := model.NewState(resState, infoState, initBelief)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating initial belief: %w", err)
+	}
+	state, err := model.NewState(resState, infoState, initBelief)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating state: %w", err)
+	}
 
 	// Construct Transition Matrix and Observation Model for Belief Filter
-	tMatrix, _ := model.NewTransitionMatrix(
+	tMatrix, err := model.NewTransitionMatrix(
 		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
 		r.cfg.Market.TransitionProb,
 	)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating transition matrix: %w", err)
+	}
 	loadsMean := float64(r.cfg.LoadsPerEpoch)
-	obsModel, _ := model.NewMarketObservationModel(map[string]model.PostureObservationProfile{
+	obsModel, err := model.NewMarketObservationModel(map[string]model.PostureObservationProfile{
 		"AGGRESSIVE": {
 			ExpectedWinProbability: 0.35,
 			ExpectedSpotRateMean:   2.15,
@@ -419,11 +437,17 @@ func (r *TournamentRunner) runEpisodeN1(ctx context.Context, seed uint64) (simRe
 			ExpectedOffersMean:     loadsMean,
 		},
 	})
-	beliefFilter, _ := model.NewCompetitiveBeliefFilter[model.AggregatedMarket](
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating observation model: %w", err)
+	}
+	beliefFilter, err := model.NewCompetitiveBeliefFilter[model.AggregatedMarket](
 		marketScale,
 		tMatrix,
 		obsModel,
 	)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating belief filter: %w", err)
+	}
 
 	// N=1 CFA Policy with active competitor risk adjustment
 	cfaParams := policy.CFAParameters{
@@ -543,15 +567,24 @@ func (r *TournamentRunner) runEpisodeN1Blind(ctx context.Context, seed uint64) (
 	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
 	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
 	resState := model.NewResourceState(initialDrivers, initialLoads)
-	infoState, _ := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating info state: %w", err)
+	}
 
 	marketScale := model.AggregatedMarket{LatentStates: []string{"AGGRESSIVE", "MODERATE", "PASSIVE"}}
-	initBelief, _ := model.NewBelief[model.AggregatedMarket](
+	initBelief, err := model.NewBelief[model.AggregatedMarket](
 		marketScale,
 		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
 		[]float64{1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0},
 	)
-	state, _ := model.NewState(resState, infoState, initBelief)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating initial belief: %w", err)
+	}
+	state, err := model.NewState(resState, infoState, initBelief)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating state: %w", err)
+	}
 
 	cfaParams := policy.CFAParameters{
 		ThetaEmpty: 1.0,
@@ -758,27 +791,45 @@ func (r *TournamentRunner) runEpisodeN0Informed(ctx context.Context, seed uint64
 	initialDrivers := GenerateTestDrivers(r.cfg.DriverCount, rng)
 	initialLoads := GenerateStochasticLoads(r.cfg.LoadsPerEpoch, startEpoch, rng)
 	resState := model.NewResourceState(initialDrivers, initialLoads)
-	infoState, _ := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, len(initialLoads))
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating info state: %w", err)
+	}
 
 	marketScale := model.AggregatedMarket{LatentStates: []string{"AGGRESSIVE", "MODERATE", "PASSIVE"}}
-	initBelief, _ := model.NewBelief[model.AggregatedMarket](
+	initBelief, err := model.NewBelief[model.AggregatedMarket](
 		marketScale,
 		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
 		[]float64{1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0},
 	)
-	state, _ := model.NewState(resState, infoState, initBelief)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating initial belief: %w", err)
+	}
+	state, err := model.NewState(resState, infoState, initBelief)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating state: %w", err)
+	}
 
-	tMatrix, _ := model.NewTransitionMatrix(
+	tMatrix, err := model.NewTransitionMatrix(
 		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
 		r.cfg.Market.TransitionProb,
 	)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating transition matrix: %w", err)
+	}
 	loadsMean := float64(r.cfg.LoadsPerEpoch)
-	obsModel, _ := model.NewMarketObservationModel(map[string]model.PostureObservationProfile{
+	obsModel, err := model.NewMarketObservationModel(map[string]model.PostureObservationProfile{
 		"AGGRESSIVE": {ExpectedWinProbability: 0.35, ExpectedSpotRateMean: 2.15, ExpectedSpotRateStdDev: 0.10, ExpectedOffersMean: loadsMean},
 		"MODERATE":   {ExpectedWinProbability: 0.65, ExpectedSpotRateMean: 2.50, ExpectedSpotRateStdDev: 0.10, ExpectedOffersMean: loadsMean},
 		"PASSIVE":    {ExpectedWinProbability: 0.85, ExpectedSpotRateMean: 2.95, ExpectedSpotRateStdDev: 0.10, ExpectedOffersMean: loadsMean},
 	})
-	beliefFilter, _ := model.NewCompetitiveBeliefFilter[model.AggregatedMarket](marketScale, tMatrix, obsModel)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating observation model: %w", err)
+	}
+	beliefFilter, err := model.NewCompetitiveBeliefFilter[model.AggregatedMarket](marketScale, tMatrix, obsModel)
+	if err != nil {
+		return simResult{}, fmt.Errorf("tournament: failed creating belief filter: %w", err)
+	}
 
 	// CFA Policy with posture-informed risk adjustment but NO spot pricing wrapper (P_legacy, informed)
 	cfaParams := policy.CFAParameters{
@@ -925,10 +976,22 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 		v11[ep] = s11.NetContribution
 	}
 
-	tV11VsV00, _ := pkgmath.ComputePairedTTest(v00, v11)
-	tV11VsV10, _ := pkgmath.ComputePairedTTest(v10, v11)
-	tV10VsV00, _ := pkgmath.ComputePairedTTest(v00, v10)
-	tV01VsV00, _ := pkgmath.ComputePairedTTest(v00, v01)
+	tV11VsV00, err := pkgmath.ComputePairedTTest(v00, v11)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test v11 vs v00 failed: %w", err)
+	}
+	tV11VsV10, err := pkgmath.ComputePairedTTest(v10, v11)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test v11 vs v10 failed: %w", err)
+	}
+	tV10VsV00, err := pkgmath.ComputePairedTTest(v00, v10)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test v10 vs v00 failed: %w", err)
+	}
+	tV01VsV00, err := pkgmath.ComputePairedTTest(v00, v01)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test v01 vs v00 failed: %w", err)
+	}
 
 	mean00 := tV11VsV00.MeanBaseline
 	mean01 := tV01VsV00.MeanCandidate

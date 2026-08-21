@@ -39,7 +39,11 @@ type DispatchRunner struct {
 // NewDispatchRunner constructs a new DispatchRunner.
 func NewDispatchRunner(synthesizer *policy.TourSynthesizer) *DispatchRunner {
 	if synthesizer == nil {
-		synthesizer = policy.NewTourSynthesizer(policy.DefaultTourSynthesizerConfig())
+		synth, err := policy.NewTourSynthesizer(policy.DefaultTourSynthesizerConfig())
+		if err != nil {
+			panic(fmt.Sprintf("dispatch: failed to create default tour synthesizer: %v", err))
+		}
+		synthesizer = synth
 	}
 	return &DispatchRunner{
 		synthesizer: synthesizer,

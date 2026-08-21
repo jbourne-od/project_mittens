@@ -108,33 +108,36 @@ func NewDLAPolicy[C model.CompetitorScale](
 	regionManager *model.RegionManager,
 	ruleReg *rules.RuleRegistry,
 	logger *slog.Logger,
-) *DLAPolicy[C] {
+) (*DLAPolicy[C], error) {
 	if params.Horizon < 1 {
-		params.Horizon = 1
+		return nil, fmt.Errorf("dla: horizon must be >= 1, got %d", params.Horizon)
 	}
 	if params.NumRollouts < 1 {
-		params.NumRollouts = 1
+		return nil, fmt.Errorf("dla: num rollouts must be >= 1, got %d", params.NumRollouts)
 	}
-	if params.DiscountFactor < 0.0 || params.DiscountFactor > 1.0 {
-		params.DiscountFactor = 0.95
+	if params.DiscountFactor <= 0.0 || params.DiscountFactor > 1.0 {
+		return nil, fmt.Errorf("dla: discount factor must be in (0, 1], got %f", params.DiscountFactor)
 	}
 	if params.MaxConcurrentBranches < 1 {
-		params.MaxConcurrentBranches = 16
+		return nil, fmt.Errorf("dla: max concurrent branches must be >= 1, got %d", params.MaxConcurrentBranches)
 	}
 	if params.StepSeconds <= 0 {
-		params.StepSeconds = 10800
+		return nil, fmt.Errorf("dla: step seconds must be > 0, got %d", params.StepSeconds)
 	}
 	if params.ExplorationFactor <= 0 {
-		params.ExplorationFactor = 1.414
+		return nil, fmt.Errorf("dla: exploration factor must be > 0, got %f", params.ExplorationFactor)
 	}
 	if params.MinRollouts < 1 {
-		params.MinRollouts = 1
+		return nil, fmt.Errorf("dla: min rollouts must be >= 1, got %d", params.MinRollouts)
 	}
 	if params.MaxRollouts < params.MinRollouts {
-		params.MaxRollouts = params.MinRollouts
+		return nil, fmt.Errorf("dla: max rollouts (%d) cannot be less than min rollouts (%d)", params.MaxRollouts, params.MinRollouts)
 	}
 	if regionManager == nil {
-		regionManager = model.NewRegionManager(1.0, nil)
+		return nil, fmt.Errorf("dla: region manager cannot be nil")
+	}
+	if basePolicy == nil {
+		return nil, fmt.Errorf("dla: base policy cannot be nil")
 	}
 	if logger == nil {
 		logger = logging.NewNop()
@@ -151,7 +154,7 @@ func NewDLAPolicy[C model.CompetitorScale](
 		regionManager: regionManager,
 		ruleReg:       ruleReg,
 		logger:        logger,
-	}
+	}, nil
 }
 
 // Name returns the descriptive name of the DLA policy.
@@ -182,15 +185,16 @@ func (p *DLAPolicy[C]) Evaluate(
 	span.SetAttributes(telemetry.OptimizationSpanAttributes("DLA", len(drivers), len(loads), competitorScale)...)
 	span.SetAttributes(telemetry.DLASpanAttributes(p.params.Horizon, p.params.NumRollouts, p.params.MaxConcurrentBranches)...)
 
+	thetaParams := []float64{float64(p.params.Horizon), float64(p.params.NumRollouts), p.params.DiscountFactor}
+	prov := NewDecisionProvenance(p.Name(), state, thetaParams)
+
 	if len(drivers) == 0 || len(loads) == 0 {
 		logger.DebugContext(ctx, "dla evaluation skipped: empty drivers or loads",
 			slog.Int("drivers", len(drivers)),
 			slog.Int("loads", len(loads)),
 		)
 		action := model.NewAction(nil, nil)
-		return action, DecisionProvenance{
-			PolicyName: p.Name(),
-		}, nil
+		return action, prov, nil
 	}
 
 	epoch := drivers[0].AvailableEpoch
@@ -207,9 +211,8 @@ func (p *DLAPolicy[C]) Evaluate(
 
 	if len(arcs) == 0 {
 		action := model.NewAction(nil, nil)
-		return action, DecisionProvenance{
-			PolicyName: p.Name(),
-		}, nil
+		prov.BatchEpoch = epoch
+		return action, prov, nil
 	}
 
 	logger.DebugContext(ctx, "dla candidate filtering complete",
@@ -227,7 +230,7 @@ func (p *DLAPolicy[C]) Evaluate(
 		err   error
 	}
 
-	// 2a. Pre-score arcs to determine top candidate branches for beam search
+	// 2a. Pre-score arcs to determine top candidate branches for beam search (fail closed on missing entities)
 	type arcPreScore struct {
 		index                 int
 		immediateContribution float64
@@ -236,13 +239,25 @@ func (p *DLAPolicy[C]) Evaluate(
 	}
 	preScores := make([]arcPreScore, len(arcs))
 	for i, arc := range arcs {
-		driver, _ := res.GetDriver(arc.DriverID)
-		load, _ := res.GetLoad(arc.LoadID)
+		driver, okD := res.GetDriver(arc.DriverID)
+		if !okD {
+			branchSpan.End()
+			return nil, DecisionProvenance{}, fmt.Errorf("dla: driver %s not found in resource state", arc.DriverID)
+		}
+		load, okL := res.GetLoad(arc.LoadID)
+		if !okL {
+			branchSpan.End()
+			return nil, DecisionProvenance{}, fmt.Errorf("dla: load %s not found in resource state", arc.LoadID)
+		}
 		costBreakdown := CalculateTripCost(driver, load, arc, p.costCfg)
 		infeasible := false
 		if p.ruleReg != nil {
 			ruleCtx := rules.BuildEvaluationContext(driver, load, arc.DeadheadMiles, arc.LoadedMiles)
-			ruleRes, _ := p.ruleReg.Evaluate(ctx, ruleCtx)
+			ruleRes, err := p.ruleReg.Evaluate(ctx, ruleCtx)
+			if err != nil {
+				branchSpan.End()
+				return nil, DecisionProvenance{}, fmt.Errorf("dla: rule evaluation failed for arc %s-%s: %w", arc.DriverID, arc.LoadID, err)
+			}
 			if ruleRes.IsInfeasible {
 				infeasible = true
 			} else {
@@ -309,14 +324,22 @@ func (p *DLAPolicy[C]) Evaluate(
 					continue
 				}
 
-				driver, _ := res.GetDriver(arc.DriverID)
-				load, _ := res.GetLoad(arc.LoadID)
+				driver, okD := res.GetDriver(arc.DriverID)
+				if !okD {
+					resultsChan <- branchResult{index: arcIdx, err: fmt.Errorf("dla: driver %s not found in resource state", arc.DriverID)}
+					return
+				}
+				load, okL := res.GetLoad(arc.LoadID)
+				if !okL {
+					resultsChan <- branchResult{index: arcIdx, err: fmt.Errorf("dla: load %s not found in resource state", arc.LoadID)}
+					return
+				}
 				destRegion := p.regionManager.GetRegionID(load.Destination)
 
 				// Downstream lookahead valuation (if branch is active in beam and base policy is configured)
 				dlaDownstreamVal := 0.0
 				if activeMap[arcIdx] && p.basePolicy != nil && p.params.Horizon > 0 {
-					dlaDownstreamVal = p.evaluateBranchRollouts(
+					val, err := p.evaluateBranchRollouts(
 						ctx,
 						state,
 						driver,
@@ -325,6 +348,11 @@ func (p *DLAPolicy[C]) Evaluate(
 						epoch,
 						uint64(arcIdx),
 					)
+					if err != nil {
+						resultsChan <- branchResult{index: arcIdx, err: err}
+						return
+					}
+					dlaDownstreamVal = val
 				}
 
 				totalScore := pre.immediateContribution + dlaDownstreamVal
@@ -385,17 +413,13 @@ func (p *DLAPolicy[C]) Evaluate(
 	// 4. Construct validated Action and complete Provenance audit record
 	action := model.NewAction(matches, nil)
 
-	provenance := DecisionProvenance{
-		BatchEpoch:           epoch,
-		PolicyName:           p.Name(),
-		ThetaParameters:      []float64{float64(p.params.Horizon), float64(p.params.NumRollouts), p.params.DiscountFactor},
-		EvaluatedArcs:        sortedEvals,
-		MatchedCount:         len(matches),
-		TotalNetContribution: totalNetContrib,
-		TotalObjectiveValue:  totalObj,
-	}
+	prov.BatchEpoch = epoch
+	prov.EvaluatedArcs = sortedEvals
+	prov.MatchedCount = len(matches)
+	prov.TotalNetContribution = totalNetContrib
+	prov.TotalObjectiveValue = totalObj
 
-	return action, provenance, nil
+	return action, prov, nil
 }
 
 // evaluateBranchRollouts simulates K forward Monte Carlo trajectories across H future epochs with adaptive UCT sampling.
@@ -407,7 +431,7 @@ func (p *DLAPolicy[C]) evaluateBranchRollouts(
 	arc feasibility.CandidateArc,
 	epoch int64,
 	branchIdx uint64,
-) float64 {
+) (float64, error) {
 	totalRolloutReward := 0.0
 
 	// Create single first-stage match for branch exploration
@@ -421,7 +445,7 @@ func (p *DLAPolicy[C]) evaluateBranchRollouts(
 	// Transition to immediate post-decision state S_1 (Inviolate 5: fresh allocation, immutable parent)
 	sNext, err := initialState.Transition(firstAction, nil)
 	if err != nil {
-		return 0.0
+		return 0.0, fmt.Errorf("dla: rollout initial transition failed: %w", err)
 	}
 
 	rolloutCount := p.params.NumRollouts
@@ -437,7 +461,7 @@ func (p *DLAPolicy[C]) evaluateBranchRollouts(
 		for h := 1; h <= p.params.Horizon; h++ {
 			select {
 			case <-ctx.Done():
-				return 0.0
+				return 0.0, ctx.Err()
 			default:
 			}
 
@@ -465,17 +489,20 @@ func (p *DLAPolicy[C]) evaluateBranchRollouts(
 				weatherAlerts,
 			)
 			if err != nil {
-				break
+				return 0.0, fmt.Errorf("dla: rollout info transition failed at step %d: %w", h, err)
 			}
 
 			curState, err = model.NewState(resH, infoH, curState.Belief())
 			if err != nil {
-				break
+				return 0.0, fmt.Errorf("dla: rollout state construction failed at step %d: %w", h, err)
 			}
 
 			// 2. Evaluate downstream decision using base policy (e.g. CFA)
 			downstreamAction, downstreamProv, err := p.basePolicy.Evaluate(ctx, curState)
-			if err != nil || len(downstreamAction.Matches()) == 0 {
+			if err != nil {
+				return 0.0, fmt.Errorf("dla: rollout base policy evaluate failed at step %d: %w", h, err)
+			}
+			if len(downstreamAction.Matches()) == 0 {
 				break
 			}
 
@@ -486,12 +513,12 @@ func (p *DLAPolicy[C]) evaluateBranchRollouts(
 			// 4. Forward transition to S_{h+1}
 			curState, err = curState.Transition(downstreamAction, nil)
 			if err != nil {
-				break
+				return 0.0, fmt.Errorf("dla: rollout state transition failed at step %d: %w", h, err)
 			}
 		}
 
 		totalRolloutReward += rolloutReward
 	}
 
-	return totalRolloutReward / float64(rolloutCount)
+	return totalRolloutReward / float64(rolloutCount), nil
 }

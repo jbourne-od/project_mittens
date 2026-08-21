@@ -142,16 +142,20 @@ func TestDLA_AdaptiveBeamPruning(t *testing.T) {
 	paramsPruned.EnableAdaptivePruning = true
 	paramsPruned.BeamWidth = 2
 
-	dlaPruned := policy.NewDLAPolicy[model.Monopolistic](
+	rm := model.NewRegionManager(1.0, nil)
+	dlaPruned, err := policy.NewDLAPolicy[model.Monopolistic](
 		paramsPruned,
 		model.DefaultCostConfig(),
 		model.DefaultFeasibilityConfig(),
 		basePolicy,
 		testArrivalSampler,
-		nil,
+		rm,
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("NewDLAPolicy pruned failed: %v", err)
+	}
 
 	actionPruned, provPruned, err := dlaPruned.Evaluate(ctx, state)
 	if err != nil {
@@ -172,16 +176,19 @@ func TestDLA_AdaptiveBeamPruning(t *testing.T) {
 	paramsFull.EnableAdaptivePruning = false
 	paramsFull.BeamWidth = 0
 
-	dlaFull := policy.NewDLAPolicy[model.Monopolistic](
+	dlaFull, err := policy.NewDLAPolicy[model.Monopolistic](
 		paramsFull,
 		model.DefaultCostConfig(),
 		model.DefaultFeasibilityConfig(),
 		basePolicy,
 		testArrivalSampler,
-		nil,
+		rm,
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("NewDLAPolicy full failed: %v", err)
+	}
 
 	actionFull, provFull, err := dlaFull.Evaluate(ctx, state)
 	if err != nil {

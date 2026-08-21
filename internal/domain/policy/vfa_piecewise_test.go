@@ -202,7 +202,7 @@ func TestPiecewiseVFA_PolicyAntiBunching(t *testing.T) {
 	costCfg := model.DefaultCostConfig()
 	feasCfg := model.FeasibilityConfig{AverageSpeedMPH: 50.0, HOSPolicySpecs: hos.USPolicySpecs()}
 
-	vfaPolicy := policy.NewPiecewiseVFAPolicy[model.Monopolistic](
+	vfaPolicy, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](
 		vfaTable,
 		nil,
 		0.95,
@@ -210,6 +210,9 @@ func TestPiecewiseVFA_PolicyAntiBunching(t *testing.T) {
 		feasCfg,
 		rm,
 	)
+	if err != nil {
+		t.Fatalf("NewPiecewiseVFAPolicy failed: %v", err)
+	}
 
 	action, prov, err := vfaPolicy.Evaluate(context.Background(), state)
 	if err != nil {
@@ -223,4 +226,29 @@ func TestPiecewiseVFA_PolicyAntiBunching(t *testing.T) {
 
 	t.Logf("Matches: %v", matches)
 	t.Logf("Decision Provenance: %s, alternatives evaluated: %d", prov.PolicyName, len(prov.EvaluatedArcs))
+}
+
+func TestPiecewiseVFAPolicy_ConstructorValidation(t *testing.T) {
+	vfaTable := policy.NewPiecewiseLinearVFATable(nil)
+	rm := model.NewRegionManager(1.0, nil)
+	costCfg := model.DefaultCostConfig()
+	feasCfg := model.DefaultFeasibilityConfig()
+
+	// table == nil
+	if _, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](nil, nil, 0.95, costCfg, feasCfg, rm); err == nil {
+		t.Errorf("expected error for table == nil, got nil")
+	}
+
+	// discount <= 0 or > 1.0
+	if _, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](vfaTable, nil, 0.0, costCfg, feasCfg, rm); err == nil {
+		t.Errorf("expected error for discount <= 0, got nil")
+	}
+	if _, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](vfaTable, nil, 1.5, costCfg, feasCfg, rm); err == nil {
+		t.Errorf("expected error for discount > 1.0, got nil")
+	}
+
+	// rm == nil
+	if _, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](vfaTable, nil, 0.95, costCfg, feasCfg, nil); err == nil {
+		t.Errorf("expected error for rm == nil, got nil")
+	}
 }

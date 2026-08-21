@@ -55,17 +55,17 @@ type TourSynthesizer struct {
 }
 
 // NewTourSynthesizer creates a new TourSynthesizer instance.
-func NewTourSynthesizer(config TourSynthesizerConfig) *TourSynthesizer {
+func NewTourSynthesizer(config TourSynthesizerConfig) (*TourSynthesizer, error) {
 	if config.MaxTourLegs <= 0 {
-		config.MaxTourLegs = 3
+		return nil, fmt.Errorf("tour: MaxTourLegs must be > 0, got %d", config.MaxTourLegs)
 	}
 	if config.MaxPlanningHorizonHours <= 0 {
-		config.MaxPlanningHorizonHours = 72.0
+		return nil, fmt.Errorf("tour: MaxPlanningHorizonHours must be > 0, got %f", config.MaxPlanningHorizonHours)
 	}
 	if config.MaxDeadheadMiles <= 0 {
-		config.MaxDeadheadMiles = 150.0
+		return nil, fmt.Errorf("tour: MaxDeadheadMiles must be > 0, got %f", config.MaxDeadheadMiles)
 	}
-	return &TourSynthesizer{config: config}
+	return &TourSynthesizer{config: config}, nil
 }
 
 // SynthesizeTour generates an optimal multi-leg DriverTour starting from initialLoad.

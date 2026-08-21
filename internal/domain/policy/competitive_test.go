@@ -2,6 +2,7 @@ package policy_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -98,7 +99,7 @@ func TestCompetitivePOMDPPolicy_EvaluateAndPricing(t *testing.T) {
 			t.Fatalf("NewCompetitivePOMDPPolicy failed: %v", err)
 		}
 
-		action, _, err := compPol.Evaluate(context.Background(), state)
+		action, prov, err := compPol.Evaluate(context.Background(), state)
 		if err != nil {
 			t.Fatalf("Evaluate failed: %v", err)
 		}
@@ -121,6 +122,23 @@ func TestCompetitivePOMDPPolicy_EvaluateAndPricing(t *testing.T) {
 		if bid.BidPrice < expectedPrice {
 			t.Errorf("expected bid price >= %.2f, got %.2f", expectedPrice, bid.BidPrice)
 		}
+
+		// Verify provenance completeness (Inviolate 7)
+		if prov.PolicyName != "CompetitivePOMDP_CFA_Parametric" {
+			t.Errorf("expected policy name CompetitivePOMDP_CFA_Parametric, got %s", prov.PolicyName)
+		}
+		if prov.CompetitorDimension != 1 {
+			t.Errorf("expected CompetitorDimension 1, got %d", prov.CompetitorDimension)
+		}
+		if prov.DriverCount != 1 || prov.LoadCount != 1 {
+			t.Errorf("expected dimensions (1, 1), got (%d, %d)", prov.DriverCount, prov.LoadCount)
+		}
+		if prov.PricingVariables == nil || prov.PricingVariables["target_rate_per_mile"] != 2.92 {
+			t.Errorf("expected target_rate_per_mile 2.92 in pricing variables, got %+v", prov.PricingVariables)
+		}
+		if len(prov.ActiveBelief) != 3 {
+			t.Errorf("expected 3 states in ActiveBelief, got %d", len(prov.ActiveBelief))
+		}
 	})
 
 	t.Run("Aggressive Market Hurdle Elevation", func(t *testing.T) {
@@ -136,7 +154,7 @@ func TestCompetitivePOMDPPolicy_EvaluateAndPricing(t *testing.T) {
 			policy.DefaultCompetitivePricingConfig(),
 		)
 
-		action, _, err := compPol.Evaluate(context.Background(), state)
+		action, prov, err := compPol.Evaluate(context.Background(), state)
 		if err != nil {
 			t.Fatalf("Evaluate failed: %v", err)
 		}
@@ -151,6 +169,10 @@ func TestCompetitivePOMDPPolicy_EvaluateAndPricing(t *testing.T) {
 		nominalPrice := dist * 2.52
 		if bid.BidPrice < nominalPrice {
 			t.Errorf("expected bid price >= nominal rate, got %.2f vs %.2f", bid.BidPrice, nominalPrice)
+		}
+
+		if prov.PricingVariables["min_hurdle"] != 75.0+125.0*0.90 {
+			t.Errorf("expected min_hurdle 187.50, got %.2f", prov.PricingVariables["min_hurdle"])
 		}
 	})
 
@@ -179,4 +201,311 @@ func TestCompetitivePOMDPPolicy_EvaluateAndPricing(t *testing.T) {
 		}
 		wg.Wait()
 	})
+}
+
+func TestCompetitivePOMDPPolicy_MonopolisticDegeneracy(t *testing.T) {
+	// Inviolate 1: N=0 Monopolistic Degeneracy must collapse cleanly to baseline pricing without competitive drift
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+	startEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
+
+	drivers := []model.Driver{
+		{ID: "D-01", CurrentLocation: locChi, AvailableEpoch: startEpoch, Equipment: model.Equipment{Type: model.EquipDryVan}},
+	}
+	loads := []model.Load{
+		{
+			ID:                  "L-01",
+			Origin:              locChi,
+			Destination:         locAtl,
+			RequiredEquipment:   model.EquipDryVan,
+			Revenue:             3000.0,
+			PickupEarliestEpoch: startEpoch,
+			PickupLatestEpoch:   startEpoch + 36000,
+			DeliveryLatestEpoch: startEpoch + 120000,
+		},
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, _ := model.NewInformationState(startEpoch, 1.0, 2.50, 0)
+	belief := model.NewMonopolisticBelief()
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	cfa := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		model.DefaultFeasibilityConfig(),
+		nil,
+	)
+
+	compPol, err := policy.NewCompetitivePOMDPPolicy[model.Monopolistic](
+		cfa,
+		policy.DefaultCompetitivePricingConfig(),
+	)
+	if err != nil {
+		t.Fatalf("NewCompetitivePOMDPPolicy failed: %v", err)
+	}
+
+	action, prov, err := compPol.Evaluate(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
+
+	if action.MatchCount() != 1 {
+		t.Fatalf("expected 1 match, got %d", action.MatchCount())
+	}
+	if len(action.Bids()) != 1 {
+		t.Fatalf("expected 1 spot bid, got %d", len(action.Bids()))
+	}
+
+	// For N=0, aggressiveProb = 0 and passiveProb = 0
+	if prov.PricingVariables["aggressive_prob"] != 0.0 {
+		t.Errorf("expected aggressive_prob 0.0 for N=0, got %f", prov.PricingVariables["aggressive_prob"])
+	}
+	if prov.PricingVariables["passive_prob"] != 0.0 {
+		t.Errorf("expected passive_prob 0.0 for N=0, got %f", prov.PricingVariables["passive_prob"])
+	}
+	if prov.PricingVariables["min_hurdle"] != 75.0 {
+		t.Errorf("expected nominal hurdle 75.0 for N=0, got %f", prov.PricingVariables["min_hurdle"])
+	}
+	if prov.PricingVariables["target_rate_per_mile"] != 2.52 {
+		t.Errorf("expected nominal rate 2.52 for N=0, got %f", prov.PricingVariables["target_rate_per_mile"])
+	}
+	if prov.CompetitorDimension != 0 {
+		t.Errorf("expected CompetitorDimension 0, got %d", prov.CompetitorDimension)
+	}
+	if prov.ActiveBelief[model.MonopolisticSingletonKey] != 1.0 {
+		t.Errorf("expected active belief at theta_empty = 1.0, got %f", prov.ActiveBelief[model.MonopolisticSingletonKey])
+	}
+}
+
+func TestCompetitivePOMDPPolicy_MultiCompetitorGenericity(t *testing.T) {
+	// Inviolate 3: Multi-agent markets (N=3) with composite latent state keys
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+	startEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
+
+	drivers := []model.Driver{
+		{ID: "D-01", CurrentLocation: locChi, AvailableEpoch: startEpoch, Equipment: model.Equipment{Type: model.EquipDryVan}},
+	}
+	loads := []model.Load{
+		{
+			ID:                  "L-01",
+			Origin:              locChi,
+			Destination:         locAtl,
+			RequiredEquipment:   model.EquipDryVan,
+			Revenue:             3000.0,
+			PickupEarliestEpoch: startEpoch,
+			PickupLatestEpoch:   startEpoch + 36000,
+			DeliveryLatestEpoch: startEpoch + 120000,
+		},
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, _ := model.NewInformationState(startEpoch, 1.0, 2.50, 0)
+	scale := model.MultiCompetitor{Count: 3}
+
+	states := []string{"c1_agg:c2_agg:c3_agg", "c1_agg:c2_pas:c3_mod", "c1_pas:c2_pas:c3_pas"}
+
+	cfa := policy.NewCFAPolicy[model.MultiCompetitor](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		model.DefaultFeasibilityConfig(),
+		nil,
+	)
+
+	t.Run("Multi-Competitor Aggressive Concentration", func(t *testing.T) {
+		// 70% chance of all-aggressive, 20% mixed, 10% all-passive
+		probs := []float64{0.70, 0.20, 0.10}
+		belief, err := model.NewBelief(scale, states, probs)
+		if err != nil {
+			t.Fatalf("NewBelief failed: %v", err)
+		}
+		state, err := model.NewState(res, info, belief)
+		if err != nil {
+			t.Fatalf("NewState failed: %v", err)
+		}
+
+		compPol, err := policy.NewCompetitivePOMDPPolicy[model.MultiCompetitor](
+			cfa,
+			policy.DefaultCompetitivePricingConfig(),
+		)
+		if err != nil {
+			t.Fatalf("NewCompetitivePOMDPPolicy failed: %v", err)
+		}
+
+		action, prov, err := compPol.Evaluate(context.Background(), state)
+		if err != nil {
+			t.Fatalf("Evaluate failed: %v", err)
+		}
+
+		if action.MatchCount() != 1 {
+			t.Fatalf("expected 1 match, got %d", action.MatchCount())
+		}
+
+		if prov.CompetitorDimension != 3 {
+			t.Errorf("expected CompetitorDimension 3, got %d", prov.CompetitorDimension)
+		}
+
+		// Both c1_agg:c2_agg:c3_agg and c1_agg:c2_pas:c3_mod contain agg -> aggressiveProb >= 0.70
+		if prov.PricingVariables["aggressive_prob"] < 0.70 {
+			t.Errorf("expected aggressive_prob >= 0.70, got %f", prov.PricingVariables["aggressive_prob"])
+		}
+		if prov.PricingVariables["min_hurdle"] <= 75.0 {
+			t.Errorf("expected min_hurdle to be elevated above 75.0, got %f", prov.PricingVariables["min_hurdle"])
+		}
+	})
+
+	t.Run("Multi-Competitor Passive Surge", func(t *testing.T) {
+		// 80% chance of all-passive market
+		probs := []float64{0.10, 0.10, 0.80}
+		belief, err := model.NewBelief(scale, states, probs)
+		if err != nil {
+			t.Fatalf("NewBelief failed: %v", err)
+		}
+		state, err := model.NewState(res, info, belief)
+		if err != nil {
+			t.Fatalf("NewState failed: %v", err)
+		}
+
+		compPol, err := policy.NewCompetitivePOMDPPolicy[model.MultiCompetitor](
+			cfa,
+			policy.DefaultCompetitivePricingConfig(),
+		)
+		if err != nil {
+			t.Fatalf("NewCompetitivePOMDPPolicy failed: %v", err)
+		}
+
+		action, prov, err := compPol.Evaluate(context.Background(), state)
+		if err != nil {
+			t.Fatalf("Evaluate failed: %v", err)
+		}
+
+		if prov.PricingVariables["target_rate_per_mile"] != 2.92 {
+			t.Errorf("expected target_rate_per_mile 2.92 for passive market, got %f", prov.PricingVariables["target_rate_per_mile"])
+		}
+		if len(action.Bids()) != 1 {
+			t.Fatalf("expected 1 spot bid, got %d", len(action.Bids()))
+		}
+	})
+}
+
+func TestCompetitivePOMDPPolicy_CustomClassifiers(t *testing.T) {
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+	startEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
+
+	drivers := []model.Driver{
+		{ID: "D-01", CurrentLocation: locChi, AvailableEpoch: startEpoch, Equipment: model.Equipment{Type: model.EquipDryVan}},
+	}
+	loads := []model.Load{
+		{
+			ID:                  "L-01",
+			Origin:              locChi,
+			Destination:         locAtl,
+			RequiredEquipment:   model.EquipDryVan,
+			Revenue:             3000.0,
+			PickupEarliestEpoch: startEpoch,
+			PickupLatestEpoch:   startEpoch + 36000,
+			DeliveryLatestEpoch: startEpoch + 120000,
+		},
+	}
+
+	res := model.NewResourceState(drivers, loads)
+	info, _ := model.NewInformationState(startEpoch, 1.0, 2.50, 0)
+	scale := model.MultiCompetitor{Count: 2}
+
+	states := []string{"predatory_pricing", "balanced_regime", "capacity_shortage"}
+	probs := []float64{0.75, 0.15, 0.10}
+
+	belief, err := model.NewBelief(scale, states, probs)
+	if err != nil {
+		t.Fatalf("NewBelief failed: %v", err)
+	}
+	state, err := model.NewState(res, info, belief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
+
+	cfa := policy.NewCFAPolicy[model.MultiCompetitor](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		model.DefaultFeasibilityConfig(),
+		nil,
+	)
+
+	cfg := policy.DefaultCompetitivePricingConfig()
+	cfg.AggressiveClassifier = func(k string) bool {
+		return k == "predatory_pricing"
+	}
+	cfg.PassiveClassifier = func(k string) bool {
+		return k == "capacity_shortage"
+	}
+
+	compPol, err := policy.NewCompetitivePOMDPPolicy[model.MultiCompetitor](cfa, cfg)
+	if err != nil {
+		t.Fatalf("NewCompetitivePOMDPPolicy failed: %v", err)
+	}
+
+	_, prov, err := compPol.Evaluate(context.Background(), state)
+	if err != nil {
+		t.Fatalf("Evaluate failed: %v", err)
+	}
+
+	if prov.PricingVariables["aggressive_prob"] != 0.75 {
+		t.Errorf("expected aggressive_prob 0.75, got %f", prov.PricingVariables["aggressive_prob"])
+	}
+	if prov.PricingVariables["passive_prob"] != 0.10 {
+		t.Errorf("expected passive_prob 0.10, got %f", prov.PricingVariables["passive_prob"])
+	}
+}
+
+// faultyPolicy is a mock policy that returns matches for nonexistent loads to test fail-closed error handling
+type faultyPolicy[C model.CompetitorScale] struct {
+	invalidLoadID string
+}
+
+func (f *faultyPolicy[C]) Name() string {
+	return "FaultyPolicy"
+}
+
+func (f *faultyPolicy[C]) Evaluate(ctx context.Context, state *model.State[C]) (*model.Action, policy.DecisionProvenance, error) {
+	match := model.DriverLoadMatch{
+		DriverID:      "D-01",
+		LoadID:        f.invalidLoadID,
+		DispatchEpoch: 1000,
+	}
+	return model.NewAction([]model.DriverLoadMatch{match}, nil), policy.NewDecisionProvenance(f.Name(), state, nil), nil
+}
+
+func TestCompetitivePOMDPPolicy_MissingLoadFailClosed(t *testing.T) {
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	startEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
+
+	drivers := []model.Driver{
+		{ID: "D-01", CurrentLocation: locChi, AvailableEpoch: startEpoch, Equipment: model.Equipment{Type: model.EquipDryVan}},
+	}
+	res := model.NewResourceState(drivers, nil)
+	info, _ := model.NewInformationState(startEpoch, 1.0, 2.50, 0)
+	belief := model.NewMonopolisticBelief()
+	state, _ := model.NewState(res, info, belief)
+
+	faulty := &faultyPolicy[model.Monopolistic]{invalidLoadID: "NONEXISTENT-LOAD"}
+	compPol, err := policy.NewCompetitivePOMDPPolicy[model.Monopolistic](
+		faulty,
+		policy.DefaultCompetitivePricingConfig(),
+	)
+	if err != nil {
+		t.Fatalf("NewCompetitivePOMDPPolicy failed: %v", err)
+	}
+
+	_, _, err = compPol.Evaluate(context.Background(), state)
+	if err == nil {
+		t.Fatalf("expected fail-closed error on missing matched load, got nil")
+	}
+	if !strings.Contains(err.Error(), "matched load NONEXISTENT-LOAD not found in resource state") {
+		t.Errorf("unexpected error message: %v", err)
+	}
 }

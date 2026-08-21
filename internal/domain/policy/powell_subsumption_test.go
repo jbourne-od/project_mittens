@@ -384,23 +384,31 @@ func TestPowellSubsumption_Theorem3_PolicyClassCoverage(t *testing.T) {
 	}
 
 	// 2. Piecewise VFA Policy Execution
-	vfaPol := policy.NewPiecewiseVFAPolicy[model.Monopolistic](nil, nil, 0.95, costCfg, feasCfg, nil)
+	rm := model.NewRegionManager(1.0, nil)
+	pvfaTable := policy.NewPiecewiseLinearVFATable(nil)
+	vfaPol, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](pvfaTable, nil, 0.95, costCfg, feasCfg, rm)
+	if err != nil {
+		t.Fatalf("NewPiecewiseVFAPolicy failed: %v", err)
+	}
 	vfaAction, _, err := vfaPol.Evaluate(context.Background(), state)
 	if err != nil || vfaAction.MatchCount() == 0 {
 		t.Fatalf("VFA evaluation failed: %v", err)
 	}
 
 	// 3. DLA Policy Execution
-	dlaPol := policy.NewDLAPolicy[model.Monopolistic](
+	dlaPol, err := policy.NewDLAPolicy[model.Monopolistic](
 		policy.DefaultDLAParameters(),
 		costCfg,
 		feasCfg,
 		cfaPol,
 		nil,
-		nil,
+		rm,
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("NewDLAPolicy failed: %v", err)
+	}
 	dlaAction, _, err := dlaPol.Evaluate(context.Background(), state)
 	if err != nil || dlaAction.MatchCount() == 0 {
 		t.Fatalf("DLA evaluation failed: %v", err)

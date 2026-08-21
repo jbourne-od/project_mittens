@@ -125,7 +125,7 @@ func BenchmarkMatching_PiecewiseVFAPolicy(b *testing.B) {
 	table := policy.NewPiecewiseLinearVFATable(slopes)
 	rm := model.NewRegionManager(1.0, nil)
 
-	pvfaPol := policy.NewPiecewiseVFAPolicy[model.Monopolistic](
+	pvfaPol, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](
 		table,
 		nil,
 		0.95,
@@ -133,6 +133,9 @@ func BenchmarkMatching_PiecewiseVFAPolicy(b *testing.B) {
 		model.DefaultFeasibilityConfig(),
 		rm,
 	)
+	if err != nil {
+		b.Fatalf("NewPiecewiseVFAPolicy failed: %v", err)
+	}
 
 	state := generateBenchmarkState(50, 250, 99)
 	ctx := context.Background()

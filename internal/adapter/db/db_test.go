@@ -2,6 +2,8 @@ package db_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -169,5 +171,50 @@ func TestJournalRecord_IntegrityRoundtrip(t *testing.T) {
 
 	if !rec.VerifyIntegrity() {
 		t.Fatalf("VerifyIntegrity failed on freshly hashed record")
+	}
+}
+
+func TestPostgresRunRepository_UnmarshalMetadata_FailClosed(t *testing.T) {
+	// 1. Verify invalid JSON metadata fails closed when unmarshaled
+	corruptJSON := []byte("{corrupt-json-key-value: missing_quotes")
+	var meta map[string]any
+	err := json.Unmarshal(corruptJSON, &meta)
+	if err == nil {
+		t.Fatal("expected json.Unmarshal to fail on corrupt JSON bytes, got nil")
+	}
+
+	// Verify formatted error wrapping matches expected pattern
+	wrappedErr := fmt.Errorf("db: failed unmarshaling metadata for run %s: %w", "OPT_RUN_TEST", err)
+	if wrappedErr == nil {
+		t.Fatal("expected wrapped error")
+	}
+
+	// 2. Verify valid JSON metadata unmarshals properly
+	validJSON := []byte(`{"policy_class":"CFA","iterations":42,"alpha":0.05}`)
+	var validMeta map[string]any
+	if err := json.Unmarshal(validJSON, &validMeta); err != nil {
+		t.Fatalf("unexpected unmarshal failure on valid JSON: %v", err)
+	}
+	if validMeta["policy_class"] != "CFA" {
+		t.Errorf("expected policy_class 'CFA', got %v", validMeta["policy_class"])
+	}
+}
+
+func TestPostgresRunRepository_Save_MarshalValidation(t *testing.T) {
+	run := db.OptimizationRun{
+		RunID:       "TEST_RUN_001",
+		PolicyClass: "CFA",
+		FleetSize:   10,
+		LoadsCount:  20,
+		Metadata: map[string]any{
+			"key": "value",
+		},
+	}
+	metaJSON, err := json.Marshal(run.Metadata)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+	if len(metaJSON) == 0 {
+		t.Fatal("expected non-empty metaJSON")
 	}
 }

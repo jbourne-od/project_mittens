@@ -10,6 +10,7 @@ package policy
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/pkg/telemetry"
@@ -29,6 +30,14 @@ type CompetitivePricingConfig struct {
 	AggressiveRiskHurdle float64
 	// PassiveSurplusThreshold is the probability threshold b_t(PASSIVE) required to trigger surplus pricing.
 	PassiveSurplusThreshold float64
+	// AggressiveStates is an optional explicit list of latent state keys classified as aggressive.
+	AggressiveStates []string
+	// PassiveStates is an optional explicit list of latent state keys classified as passive / surplus.
+	PassiveStates []string
+	// AggressiveClassifier is an optional predicate function to classify a latent state key as aggressive.
+	AggressiveClassifier func(stateKey string) bool
+	// PassiveClassifier is an optional predicate function to classify a latent state key as passive.
+	PassiveClassifier func(stateKey string) bool
 }
 
 // DefaultCompetitivePricingConfig returns calibrated market defaults for dynamic spot rate bidding.
@@ -99,6 +108,74 @@ func (p *CompetitivePOMDPPolicy[C]) PricingConfig() CompetitivePricingConfig {
 	return p.pricingCfg
 }
 
+// computeMarketPostures aggregates the probability masses for aggressive and passive market postures
+// from the belief state b_t generically over any competitor dimension N >= 0 (Inviolate 1 & 3).
+func (p *CompetitivePOMDPPolicy[C]) computeMarketPostures(belief *model.Belief[C]) (aggressiveProb, passiveProb float64) {
+	if belief == nil {
+		return 0.0, 0.0
+	}
+	// Monopolistic degeneracy (N=0): zero competitors means zero competitive market pressure.
+	if belief.Scale().CompetitorDimension() == 0 {
+		return 0.0, 0.0
+	}
+
+	dist := belief.Distribution()
+	for stateKey, prob := range dist {
+		if p.isAggressive(stateKey) {
+			aggressiveProb += prob
+		}
+		if p.isPassive(stateKey) {
+			passiveProb += prob
+		}
+	}
+	return aggressiveProb, passiveProb
+}
+
+func (p *CompetitivePOMDPPolicy[C]) isAggressive(key string) bool {
+	if key == model.MonopolisticSingletonKey {
+		return false
+	}
+	if p.pricingCfg.AggressiveClassifier != nil {
+		return p.pricingCfg.AggressiveClassifier(key)
+	}
+	if len(p.pricingCfg.AggressiveStates) > 0 {
+		for _, s := range p.pricingCfg.AggressiveStates {
+			if s == key {
+				return true
+			}
+		}
+		return false
+	}
+	upper := strings.ToUpper(key)
+	return strings.Contains(upper, "AGGRESSIVE") ||
+		strings.Contains(upper, "AGG") ||
+		strings.Contains(upper, "TIGHT") ||
+		strings.Contains(upper, "HIGH_CAPACITY")
+}
+
+func (p *CompetitivePOMDPPolicy[C]) isPassive(key string) bool {
+	if key == model.MonopolisticSingletonKey {
+		return false
+	}
+	if p.pricingCfg.PassiveClassifier != nil {
+		return p.pricingCfg.PassiveClassifier(key)
+	}
+	if len(p.pricingCfg.PassiveStates) > 0 {
+		for _, s := range p.pricingCfg.PassiveStates {
+			if s == key {
+				return true
+			}
+		}
+		return false
+	}
+	upper := strings.ToUpper(key)
+	return strings.Contains(upper, "PASSIVE") ||
+		strings.Contains(upper, "PAS") ||
+		strings.Contains(upper, "LOOSE") ||
+		strings.Contains(upper, "DEFENSIVE") ||
+		strings.Contains(upper, "SURPLUS")
+}
+
 // Evaluate solves the matching decision under the underlying policy and formulates dynamic spot pricing bids
 // using the active competitive belief vector b_t(Theta_t).
 func (p *CompetitivePOMDPPolicy[C]) Evaluate(
@@ -118,14 +195,8 @@ func (p *CompetitivePOMDPPolicy[C]) Evaluate(
 		return nil, DecisionProvenance{}, fmt.Errorf("policy: underlying evaluate failed: %w", err)
 	}
 
-	// 2. Evaluate dynamic spot bids under competitive belief state b_t
-	bState := state.Belief()
-	var aggressiveProb float64
-	var passiveProb float64
-	if bState != nil {
-		aggressiveProb = bState.Probability("AGGRESSIVE")
-		passiveProb = bState.Probability("PASSIVE")
-	}
+	// 2. Evaluate dynamic spot bids under competitive belief state b_t generically across N >= 0
+	aggressiveProb, passiveProb := p.computeMarketPostures(state.Belief())
 
 	// Risk-aware opportunity cost hurdle:
 	// In aggressive markets: require higher hurdle margin to prevent committing fleet to low-margin freight.
@@ -145,13 +216,13 @@ func (p *CompetitivePOMDPPolicy[C]) Evaluate(
 		}
 	}
 
-	// Formulate spot pricing bids for all matched loads
+	// Formulate spot pricing bids for all matched loads (fail closed on missing load)
 	matches := baseAction.Matches()
 	spotBids := make([]model.SpotPriceBid, 0, len(matches))
 	for _, m := range matches {
 		load, found := state.Resource().GetLoad(m.LoadID)
 		if !found {
-			continue
+			return nil, DecisionProvenance{}, fmt.Errorf("policy: matched load %s not found in resource state", m.LoadID)
 		}
 		miles := load.Origin.DistanceMiles(load.Destination)
 		bidPrice := miles * targetRatePerMile
@@ -174,6 +245,26 @@ func (p *CompetitivePOMDPPolicy[C]) Evaluate(
 		attribute.Float64("policy.min_hurdle", minHurdle),
 		attribute.Float64("policy.target_rate_per_mile", targetRatePerMile),
 	)
+
+	// Wrap provenance to include combined policy name, pricing variables, belief, and state dimensions (Inviolate 7)
+	prov.PolicyName = p.Name()
+	if prov.PricingVariables == nil {
+		prov.PricingVariables = make(map[string]float64)
+	}
+	prov.PricingVariables["min_hurdle"] = minHurdle
+	prov.PricingVariables["target_rate_per_mile"] = targetRatePerMile
+	prov.PricingVariables["aggressive_prob"] = aggressiveProb
+	prov.PricingVariables["passive_prob"] = passiveProb
+	prov.PricingVariables["spot_bids_count"] = float64(len(spotBids))
+
+	if state.Resource() != nil {
+		prov.DriverCount = len(state.Resource().Drivers())
+		prov.LoadCount = len(state.Resource().Loads())
+	}
+	if state.Belief() != nil {
+		prov.CompetitorDimension = state.Belief().Scale().CompetitorDimension()
+		prov.ActiveBelief = state.Belief().Distribution()
+	}
 
 	// Combine matches and spot bids into final Action (Inviolate 5: fresh allocation)
 	action := model.NewAction(matches, spotBids)

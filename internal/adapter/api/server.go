@@ -51,7 +51,7 @@ type Server struct {
 }
 
 // NewServer initializes Chi routes, middleware, and handlers.
-func NewServer(cfg ServerConfig) *Server {
+func NewServer(cfg ServerConfig) (*Server, error) {
 	r := chi.NewRouter()
 
 	var (
@@ -68,18 +68,22 @@ func NewServer(cfg ServerConfig) *Server {
 
 	if dbConnStr != "" {
 		dbCfg, err := db.ParseURL(dbConnStr)
-		if err == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			p, err := db.NewPool(ctx, dbCfg)
-			cancel()
-			if err == nil {
-				pool = p
-				pgStore := db.NewPostgresJournalStore(pool)
-				jStore = pgStore
-				cStore = pgStore
-				runRepo = db.NewPostgresRunRepository(pool)
-			}
+		if err != nil {
+			return nil, fmt.Errorf("api server: failed parsing database URL: %w", err)
 		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		p, err := db.NewPool(ctx, dbCfg)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("api server: failed establishing database pool: %w", err)
+		}
+
+		pool = p
+		pgStore := db.NewPostgresJournalStore(pool)
+		jStore = pgStore
+		cStore = pgStore
+		runRepo = db.NewPostgresRunRepository(pool)
 	}
 
 	h := NewHandlerWithDeps(HandlerDependencies{
@@ -215,7 +219,7 @@ func NewServer(cfg ServerConfig) *Server {
 		router:  r,
 		handler: h,
 		httpSrv: srv,
-	}
+	}, nil
 }
 
 // Router returns the underlying Chi router for testing.

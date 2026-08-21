@@ -156,3 +156,62 @@ func TestRollingHorizonRunner_7DayMultiEpoch(t *testing.T) {
 		t.Errorf("expected non-nil final state")
 	}
 }
+
+func TestRollingHorizonRunner_FailClosedOnRelayError(t *testing.T) {
+	startEpoch := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC).Unix()
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}
+
+	driver := model.Driver{
+		ID:              "D-CHI",
+		CurrentLocation: locChi,
+		AvailableEpoch:  startEpoch,
+		Equipment:       model.Equipment{Type: model.EquipDryVan},
+	}
+	load := model.Load{
+		ID:                  "L-CHI-ATL",
+		Origin:              locChi,
+		Destination:         locAtl,
+		RequiredEquipment:   model.EquipDryVan,
+		Revenue:             2000.0,
+		PickupEarliestEpoch: startEpoch,
+		PickupLatestEpoch:   startEpoch + 36000,
+		DeliveryLatestEpoch: startEpoch + 120000,
+	}
+
+	res := model.NewResourceState([]model.Driver{driver}, []model.Load{load})
+	info, _ := model.NewInformationState(startEpoch, 1.0, 2.50, 0)
+	belief := model.NewMonopolisticBelief()
+	state, _ := model.NewState(res, info, belief)
+
+	cfaPol := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		model.DefaultFeasibilityConfig(),
+		nil,
+	)
+
+	runner := service.NewRollingHorizonRunner[model.Monopolistic](
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	cfg := service.RollingHorizonConfig{
+		RunID:             "TEST_FAIL_CLOSED",
+		StartEpoch:        startEpoch,
+		HorizonDays:       1,
+		DecisionStepHours: 24,
+		EnableRelays:      false,
+		MinRelayHaulMiles: 450.0,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel context immediately
+
+	_, _, err := runner.Run(ctx, cfg, state, cfaPol, nil)
+	if err == nil {
+		t.Fatalf("expected RollingHorizonRunner.Run to fail closed on cancelled context, got nil")
+	}
+}

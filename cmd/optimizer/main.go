@@ -181,20 +181,35 @@ func main() {
 			"ATL": 250.0,
 			"DAL": 300.0,
 		})
-		selectedPolicy = policy.NewVFAPolicy[model.Monopolistic](vfaTable, 0.95, costCfg, feasCfg, rm)
+		vfaPol, err := policy.NewVFAPolicy[model.Monopolistic](vfaTable, 0.95, costCfg, feasCfg, rm)
+		if err != nil {
+			logger.Error("failed to construct VFA policy", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		selectedPolicy = vfaPol
 	case "piecewise-vfa":
 		slopes := map[string]policy.RegionSlopes{
 			"CHI": {RegionID: "CHI", Slopes: []float64{500.0, 300.0, 100.0, 20.0}},
 			"ATL": {RegionID: "ATL", Slopes: []float64{600.0, 350.0, 150.0, 50.0}},
 		}
 		pvfaTable := policy.NewPiecewiseLinearVFATable(slopes)
-		selectedPolicy = policy.NewPiecewiseVFAPolicy[model.Monopolistic](pvfaTable, nil, 0.95, costCfg, feasCfg, rm)
+		pvfaPol, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](pvfaTable, nil, 0.95, costCfg, feasCfg, rm)
+		if err != nil {
+			logger.Error("failed to construct Piecewise VFA policy", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		selectedPolicy = pvfaPol
 	case "dla":
 		dlaParams := policy.DefaultDLAParameters()
 		dlaParams.Horizon = 2
 		dlaParams.NumRollouts = 4
 		basePol := policy.NewCFAPolicy[model.Monopolistic](policy.DefaultCFAParameters(), costCfg, feasCfg, nil)
-		selectedPolicy = policy.NewDLAPolicy[model.Monopolistic](dlaParams, costCfg, feasCfg, basePol, nil, rm, nil, logger)
+		dlaPol, err := policy.NewDLAPolicy[model.Monopolistic](dlaParams, costCfg, feasCfg, basePol, nil, rm, nil, logger)
+		if err != nil {
+			logger.Error("failed to construct DLA policy", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		selectedPolicy = dlaPol
 	default: // "cfa"
 		selectedPolicy = policy.NewCFAPolicy[model.Monopolistic](
 			policy.DefaultCFAParameters(),
@@ -259,11 +274,18 @@ func main() {
 
 	if *outputJSON != "" {
 		data, err := json.MarshalIndent(report, "", "  ")
-		if err == nil {
-			if writeErr := os.WriteFile(*outputJSON, data, 0644); writeErr == nil {
-				logger.InfoContext(ctx, "exported JSON report", slog.String("path", *outputJSON))
-			}
+		if err != nil {
+			logger.ErrorContext(ctx, "failed marshaling JSON report", slog.String("error", err.Error()))
+			os.Exit(1)
 		}
+		if err := os.WriteFile(*outputJSON, data, 0644); err != nil {
+			logger.ErrorContext(ctx, "failed writing JSON report to file",
+				slog.String("path", *outputJSON),
+				slog.String("error", err.Error()),
+			)
+			os.Exit(1)
+		}
+		logger.InfoContext(ctx, "exported JSON report", slog.String("path", *outputJSON))
 	}
 }
 

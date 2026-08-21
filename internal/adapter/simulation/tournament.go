@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
@@ -124,13 +126,81 @@ func (f FactorialDecomposition2x2) SummaryString() string {
 
 // FactorialReport2x2 encapsulates the full 2x2 factorial experimental run.
 type FactorialReport2x2 struct {
-	Config               TournamentConfig          `json:"config"`
-	Factorial            FactorialDecomposition2x2 `json:"factorial"`
-	TTestV11VsV00        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v00"`
-	TTestV11VsV10        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v10"`
-	TTestV10VsV00        pkgmath.PairedTTestResult `json:"t_test_v10_vs_v00"`
-	TTestV01VsV00        pkgmath.PairedTTestResult `json:"t_test_v01_vs_v00"`
-	ExecutionDurationSec float64                   `json:"execution_duration_sec"`
+	Config                      TournamentConfig          `json:"config"`
+	Factorial                   FactorialDecomposition2x2 `json:"factorial"`
+	TTestV11VsV00               pkgmath.PairedTTestResult `json:"t_test_v11_vs_v00"`
+	TTestV11VsV10               pkgmath.PairedTTestResult `json:"t_test_v11_vs_v10"`
+	TTestV10VsV00               pkgmath.PairedTTestResult `json:"t_test_v10_vs_v00"`
+	TTestV01VsV00               pkgmath.PairedTTestResult `json:"t_test_v01_vs_v00"`
+	TTestV11VsV01               pkgmath.PairedTTestResult `json:"t_test_v11_vs_v01"`
+	TTestInteraction            pkgmath.PairedTTestResult `json:"t_test_interaction"`
+	PositiveInteractionEpisodes int                       `json:"positive_interaction_episodes"`
+	NegativeInteractionEpisodes int                       `json:"negative_interaction_episodes"`
+	ExactTieInteractionEpisodes int                       `json:"exact_tie_interaction_episodes"`
+	ExecutionDurationSec        float64                   `json:"execution_duration_sec"`
+}
+
+// SummaryString formats the 2x2 factorial experimental scorecard and hypothesis tests.
+func (r *FactorialReport2x2) SummaryString() string {
+	f := r.Factorial
+	totSurplus := f.TotalLift
+	shapleyActionPct := 0.0
+	shapleyInfoPct := 0.0
+	if math.Abs(totSurplus) > 1e-6 {
+		shapleyActionPct = (f.MainEffectActionSpace / totSurplus) * 100.0
+		shapleyInfoPct = (f.MainEffectInformation / totSurplus) * 100.0
+	}
+
+	n := float64(r.Config.Episodes)
+	posPct := (float64(r.PositiveInteractionEpisodes) / n) * 100.0
+	negPct := (float64(r.NegativeInteractionEpisodes) / n) * 100.0
+	tiePct := (float64(r.ExactTieInteractionEpisodes) / n) * 100.0
+
+	return fmt.Sprintf(
+		"================================================================================\n"+
+			"          PROJECT MITTENS: 2x2 FACTORIAL VALUE OF INFORMATION & PRICING         \n"+
+			"================================================================================\n"+
+			"2x2 Empirical Economic Matrix:\n"+
+			"                   | Blind Belief (b0) | Informed Belief (bt) | Marginal Info Effect\n"+
+			"  -----------------+-------------------+----------------------+----------------------\n"+
+			"  Legacy Action    | V00 = $%9.2f  | V01 = $%9.2f     | Δ_I|legacy = $%+9.2f\n"+
+			"  Competitive Act. | V10 = $%9.2f  | V11 = $%9.2f     | Δ_I|comp   = $%+9.2f\n"+
+			"  -----------------+-------------------+----------------------+----------------------\n"+
+			"  Marginal Action  | Δ_A|blind         | Δ_A|informed         | Total Lift (V11-V00)\n"+
+			"  Effect           | $%+9.2f       | $%+9.2f          | Total: $%+9.2f (%+.2f%%)\n\n"+
+			"  Main Effect of Action Space (ME_A):  +$%9.2f  (Shapley Allocation: %.1f%%)\n"+
+			"  Main Effect of Information (ME_I):   +$%9.2f  (Shapley Allocation: %.1f%%)\n"+
+			"  * Note: For 2 factors, main effects equal Shapley allocations of the joint surplus.\n"+
+			"--------------------------------------------------------------------------------\n"+
+			" Statistical Contrasts & Hypothesis Tests (N = %d paired episodes):\n"+
+			"  • Δ_I|legacy (V01-V00): Mean = $%+9.2f | 95%% CI: [$%+9.2f, $%+9.2f] | t = %+6.2f | p = %.3e | d_z = %+.4f | (Info under legacy)\n"+
+			"  • Δ_A|blind  (V10-V00): Mean = $%+9.2f | 95%% CI: [$%+9.2f, $%+9.2f] | t = %+6.2f | p = %.3e | d_z = %+.4f | (Blind pricing hurts)\n"+
+			"  • Δ_I|comp   (V11-V10): Mean = $%+9.2f | 95%% CI: [$%+9.2f, $%+9.2f] | t = %+6.2f | p = %.3e | d_z = %+.4f | (Info under competitive)\n"+
+			"  • Δ_A|inf    (V11-V01): Mean = $%+9.2f | 95%% CI: [$%+9.2f, $%+9.2f] | t = %+6.2f | p = %.3e | d_z = %+.4f | (Full vs informed legacy)\n"+
+			"  • Full Lift  (V11-V00): Mean = $%+9.2f | 95%% CI: [$%+9.2f, $%+9.2f] | t = %+6.2f | p = %.3e | d_z = %+.4f | (Total Mittens lift: %+.2f%%)\n"+
+			"--------------------------------------------------------------------------------\n"+
+			" Factorial Cross-Effect Analysis (Supermodular Interaction on Treatment Lattice):\n"+
+			"  • Mean Interaction Δ_int:  +$%.2f (SD = $%.2f, SE = $%.2f)\n"+
+			"  • 95%% Paired Confidence:   [$+%.2f, $+%.2f]\n"+
+			"  • Hypothesis Test:         t = %+6.2f, df = %d, p(two-tailed) = %e, Cohen's d_z = %.4f\n"+
+			"  • Episode Attribution:     Positive: %d (%.1f%%) | Negative: %d (%.1f%%) | Exact Tie: %d (%.1f%%)\n"+
+			"================================================================================\n",
+		f.V00_LegacyBlind, f.V01_LegacyInformed, f.ConditionalVoIUnderLegacy,
+		f.V10_CompetitiveBlind, f.V11_CompetitiveInformed, f.ConditionalVoIUnderComp,
+		f.V10_CompetitiveBlind-f.V00_LegacyBlind, f.V11_CompetitiveInformed-f.V01_LegacyInformed, f.TotalLift, r.TTestV11VsV00.PercentLift,
+		f.MainEffectActionSpace, shapleyActionPct,
+		f.MainEffectInformation, shapleyInfoPct,
+		r.Config.Episodes,
+		r.TTestV01VsV00.MeanDifference, r.TTestV01VsV00.ConfidenceLow95, r.TTestV01VsV00.ConfidenceHigh95, r.TTestV01VsV00.TStatistic, r.TTestV01VsV00.PValueTwoTailed, r.TTestV01VsV00.CohensD,
+		r.TTestV10VsV00.MeanDifference, r.TTestV10VsV00.ConfidenceLow95, r.TTestV10VsV00.ConfidenceHigh95, r.TTestV10VsV00.TStatistic, r.TTestV10VsV00.PValueTwoTailed, r.TTestV10VsV00.CohensD,
+		r.TTestV11VsV10.MeanDifference, r.TTestV11VsV10.ConfidenceLow95, r.TTestV11VsV10.ConfidenceHigh95, r.TTestV11VsV10.TStatistic, r.TTestV11VsV10.PValueTwoTailed, r.TTestV11VsV10.CohensD,
+		r.TTestV11VsV01.MeanDifference, r.TTestV11VsV01.ConfidenceLow95, r.TTestV11VsV01.ConfidenceHigh95, r.TTestV11VsV01.TStatistic, r.TTestV11VsV01.PValueTwoTailed, r.TTestV11VsV01.CohensD,
+		r.TTestV11VsV00.MeanDifference, r.TTestV11VsV00.ConfidenceLow95, r.TTestV11VsV00.ConfidenceHigh95, r.TTestV11VsV00.TStatistic, r.TTestV11VsV00.PValueTwoTailed, r.TTestV11VsV00.CohensD, r.TTestV11VsV00.PercentLift,
+		r.TTestInteraction.MeanDifference, r.TTestInteraction.StdDevDifference, r.TTestInteraction.StdErrDifference,
+		r.TTestInteraction.ConfidenceLow95, r.TTestInteraction.ConfidenceHigh95,
+		r.TTestInteraction.TStatistic, int(r.TTestInteraction.DegreesOfFreedom), r.TTestInteraction.PValueTwoTailed, r.TTestInteraction.CohensD,
+		r.PositiveInteractionEpisodes, posPct, r.NegativeInteractionEpisodes, negPct, r.ExactTieInteractionEpisodes, tiePct,
+	)
 }
 
 // TripartiteReport encapsulates the findings of a 3-way head-to-head tournament.
@@ -1014,43 +1084,88 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	v10 := make([]float64, cfg.Episodes)
 	v11 := make([]float64, cfg.Episodes)
 
+	type epResult struct {
+		ep  int
+		s00 simResult
+		s01 simResult
+		s10 simResult
+		s11 simResult
+		err error
+	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+	if numWorkers > cfg.Episodes {
+		numWorkers = cfg.Episodes
+	}
+
+	jobs := make(chan int, cfg.Episodes)
+	results := make(chan epResult, cfg.Episodes)
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ep := range jobs {
+				select {
+				case <-ctx.Done():
+					results <- epResult{ep: ep, err: ctx.Err()}
+					return
+				default:
+				}
+
+				epSeed := cfg.BaseSeed + uint64(ep)*7919
+				s00, err00 := r.runEpisodeN0(ctx, epSeed)
+				if err00 != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial: episode %d V00 failed: %w", ep, err00)}
+					return
+				}
+				s01, err01 := r.runEpisodeN0Informed(ctx, epSeed)
+				if err01 != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial: episode %d V01 failed: %w", ep, err01)}
+					return
+				}
+				s10, err10 := r.runEpisodeN1Blind(ctx, epSeed)
+				if err10 != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial: episode %d V10 failed: %w", ep, err10)}
+					return
+				}
+				s11, err11 := r.runEpisodeN1(ctx, epSeed)
+				if err11 != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial: episode %d V11 failed: %w", ep, err11)}
+					return
+				}
+
+				results <- epResult{ep: ep, s00: s00, s01: s01, s10: s10, s11: s11}
+			}
+		}()
+	}
+
 	for ep := 0; ep < cfg.Episodes; ep++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
+		jobs <- ep
+	}
+	close(jobs)
 
-		renderProgress(ep, cfg.Episodes, fmt.Sprintf("Episode %d/%d (Factorial 2x2)...", ep+1, cfg.Episodes), startTime)
-		epSeed := cfg.BaseSeed + uint64(ep)*7919
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
 
-		// 1. Run V00 (Legacy Action + Blind)
-		s00, err := r.runEpisodeN0(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V00 failed: %w", ep, err)
+	completed := 0
+	for res := range results {
+		if res.err != nil {
+			return nil, res.err
 		}
-		// 2. Run V01 (Legacy Action + Informed)
-		s01, err := r.runEpisodeN0Informed(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V01 failed: %w", ep, err)
-		}
-		// 3. Run V10 (Competitive Action + Blind)
-		s10, err := r.runEpisodeN1Blind(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V10 failed: %w", ep, err)
-		}
-		// 4. Run V11 (Competitive Action + Informed)
-		s11, err := r.runEpisodeN1(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V11 failed: %w", ep, err)
-		}
+		v00[res.ep] = res.s00.NetContribution
+		v01[res.ep] = res.s01.NetContribution
+		v10[res.ep] = res.s10.NetContribution
+		v11[res.ep] = res.s11.NetContribution
 
-		v00[ep] = s00.NetContribution
-		v01[ep] = s01.NetContribution
-		v10[ep] = s10.NetContribution
-		v11[ep] = s11.NetContribution
-
-		renderProgress(ep+1, cfg.Episodes, fmt.Sprintf("Episode %d/%d complete", ep+1, cfg.Episodes), startTime)
+		completed++
+		renderProgress(completed, cfg.Episodes, fmt.Sprintf("Episodes completed: %d/%d (Workers: %d)", completed, cfg.Episodes, numWorkers), startTime)
 	}
 
 	tV11VsV00, err := pkgmath.ComputePairedTTest(v00, v11)
@@ -1068,6 +1183,34 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	tV01VsV00, err := pkgmath.ComputePairedTTest(v00, v01)
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v01 vs v00 failed: %w", err)
+	}
+	tV11VsV01, err := pkgmath.ComputePairedTTest(v01, v11)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test v11 vs v01 failed: %w", err)
+	}
+
+	dComp := make([]float64, cfg.Episodes)
+	dLegacy := make([]float64, cfg.Episodes)
+	posCount := 0
+	negCount := 0
+	tieCount := 0
+
+	for ep := 0; ep < cfg.Episodes; ep++ {
+		dComp[ep] = v11[ep] - v10[ep]
+		dLegacy[ep] = v01[ep] - v00[ep]
+		diffInt := dComp[ep] - dLegacy[ep]
+		if diffInt > 1e-4 {
+			posCount++
+		} else if diffInt < -1e-4 {
+			negCount++
+		} else {
+			tieCount++
+		}
+	}
+
+	tInteraction, err := pkgmath.ComputePairedTTest(dLegacy, dComp)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test interaction failed: %w", err)
 	}
 
 	mean00 := tV11VsV00.MeanBaseline
@@ -1093,13 +1236,18 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	}
 
 	return &FactorialReport2x2{
-		Config:               cfg,
-		Factorial:            factorial,
-		TTestV11VsV00:        tV11VsV00,
-		TTestV11VsV10:        tV11VsV10,
-		TTestV10VsV00:        tV10VsV00,
-		TTestV01VsV00:        tV01VsV00,
-		ExecutionDurationSec: time.Since(startTime).Seconds(),
+		Config:                      cfg,
+		Factorial:                   factorial,
+		TTestV11VsV00:               tV11VsV00,
+		TTestV11VsV10:               tV11VsV10,
+		TTestV10VsV00:               tV10VsV00,
+		TTestV01VsV00:               tV01VsV00,
+		TTestV11VsV01:               tV11VsV01,
+		TTestInteraction:            tInteraction,
+		PositiveInteractionEpisodes: posCount,
+		NegativeInteractionEpisodes: negCount,
+		ExactTieInteractionEpisodes: tieCount,
+		ExecutionDurationSec:        time.Since(startTime).Seconds(),
 	}, nil
 }
 

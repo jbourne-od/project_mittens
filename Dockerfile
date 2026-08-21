@@ -28,8 +28,9 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
-# Copy full source tree
+# Copy full source tree and embed compiled frontend dist
 COPY . .
+COPY --from=web-builder /web/dist ./web/dist
 
 # Compile static binaries for server, batch optimizer, and tournament harness
 ENV CGO_ENABLED=0 \
@@ -61,6 +62,7 @@ COPY --from=web-builder /web/dist /var/www/mittens/dist
 
 # Configure static assets location for embedded HTTP server
 ENV MITTENS_STATIC_DIR=/var/www/mittens/dist
+
 
 # Non-root user (distroless nonroot UID=65532, GID=65532)
 USER nonroot:nonroot

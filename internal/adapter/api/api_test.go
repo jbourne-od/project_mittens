@@ -693,15 +693,37 @@ func TestAPI_ScenarioCatalogEndpoints(t *testing.T) {
 func TestAPI_StaticWebServing(t *testing.T) {
 	srv := api.NewServer(api.DefaultServerConfig())
 
-	// Test GET / (should serve index.html from web/dist if present)
-	req, _ := http.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	srv.Router().ServeHTTP(rr, req)
+	// 1. Test GET / (serves index.html from embedded web.Assets)
+	reqRoot, _ := http.NewRequest(http.MethodGet, "/", nil)
+	rrRoot := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rrRoot, reqRoot)
 
-	// Since web/dist was built, it should return 200 OK with HTML
-	if rr.Code == http.StatusOK {
-		if !strings.Contains(rr.Body.String(), "Project Mittens") {
-			t.Errorf("expected HTML to contain 'Project Mittens', got: %s", rr.Body.String())
-		}
+	if rrRoot.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from GET /, got %d (body: %s)", rrRoot.Code, rrRoot.Body.String())
+	}
+	body := rrRoot.Body.String()
+	if !strings.Contains(body, "html") {
+		t.Errorf("expected HTML response, got: %s", body)
+	}
+
+	// 2. Test GET /simulation/route (SPA Client-side Route Fallback -> index.html)
+	reqSPA, _ := http.NewRequest(http.MethodGet, "/simulation/route", nil)
+	rrSPA := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rrSPA, reqSPA)
+
+	if rrSPA.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from SPA route, got %d", rrSPA.Code)
+	}
+	if !strings.Contains(rrSPA.Body.String(), "html") {
+		t.Errorf("expected HTML response for SPA route, got: %s", rrSPA.Body.String())
+	}
+
+	// 3. Test GET /api/v1/unknown (API route -> 404)
+	reqAPI, _ := http.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil)
+	rrAPI := httptest.NewRecorder()
+	srv.Router().ServeHTTP(rrAPI, reqAPI)
+
+	if rrAPI.Code != http.StatusNotFound {
+		t.Errorf("expected 404 Not Found for missing API route, got %d", rrAPI.Code)
 	}
 }

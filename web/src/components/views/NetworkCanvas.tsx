@@ -26,7 +26,19 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     const allLocs: { id: string; lat: number; lon: number; label: string }[] = [];
 
     const addLoc = (id: string, lat: number, lon: number, label: string) => {
-      if (isNaN(lat) || isNaN(lon)) return;
+      if (
+        typeof lat !== 'number' ||
+        typeof lon !== 'number' ||
+        isNaN(lat) ||
+        isNaN(lon) ||
+        (lat === 0 && lon === 0) ||
+        lat < 10 ||
+        lat > 75 ||
+        lon < -170 ||
+        lon > -50
+      ) {
+        return;
+      }
       minLat = Math.min(minLat, lat);
       maxLat = Math.max(maxLat, lat);
       minLon = Math.min(minLon, lon);
@@ -35,20 +47,32 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
     };
 
     drivers.forEach((d) => {
-      addLoc(d.current_location.node_id, d.current_location.lat, d.current_location.lon, d.current_location.node_id);
+      if (d.current_location) {
+        addLoc(d.current_location.node_id, d.current_location.lat, d.current_location.lon, d.current_location.node_id);
+      }
     });
 
     loads.forEach((l) => {
-      addLoc(l.origin.node_id, l.origin.lat, l.origin.lon, l.origin.node_id);
-      addLoc(l.destination.node_id, l.destination.lat, l.destination.lon, l.destination.node_id);
+      if (l.origin) {
+        addLoc(l.origin.node_id, l.origin.lat, l.origin.lon, l.origin.node_id);
+      }
+      if (l.destination) {
+        addLoc(l.destination.node_id, l.destination.lat, l.destination.lon, l.destination.node_id);
+      }
     });
 
-    if (allLocs.length === 0) {
-      minLat = 25; maxLat = 50; minLon = -125; maxLon = -65;
+    if (allLocs.length === 0 || minLat >= maxLat || minLon >= maxLon) {
+      minLat = 24.0;
+      maxLat = 50.0;
+      minLon = -125.0;
+      maxLon = -66.0;
     }
 
-    const latPad = Math.max(1.0, (maxLat - minLat) * 0.15);
-    const lonPad = Math.max(1.0, (maxLon - minLon) * 0.15);
+    const latSpan = Math.max(2.0, maxLat - minLat);
+    const lonSpan = Math.max(2.0, maxLon - minLon);
+
+    const latPad = latSpan * 0.20;
+    const lonPad = lonSpan * 0.20;
 
     const effectiveMinLat = minLat - latPad;
     const effectiveMaxLat = maxLat + latPad;
@@ -57,14 +81,25 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
 
     const width = 800;
     const height = 460;
+    const paddingX = 65;
+    const paddingY = 55;
 
     const project = (lat: number, lon: number) => {
-      const x = ((lon - effectiveMinLon) / (effectiveMaxLon - effectiveMinLon || 1)) * (width - 80) + 40;
-      const y = height - (((lat - effectiveMinLat) / (effectiveMaxLat - effectiveMinLat || 1)) * (height - 80) + 40);
+      if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) {
+        return { x: width / 2, y: height / 2 };
+      }
+      const latRange = effectiveMaxLat - effectiveMinLat || 1;
+      const lonRange = effectiveMaxLon - effectiveMinLon || 1;
+
+      const normX = Math.max(0, Math.min(1, (lon - effectiveMinLon) / lonRange));
+      const normY = Math.max(0, Math.min(1, (lat - effectiveMinLat) / latRange));
+
+      const x = normX * (width - 2 * paddingX) + paddingX;
+      const y = height - (normY * (height - 2 * paddingY) + paddingY);
       return { x, y };
     };
 
-    // Deduplicate nodes
+    // Deduplicate nodes by id
     const nodeMap = new Map<string, { id: string; x: number; y: number; label: string; lat: number; lon: number }>();
     allLocs.forEach((loc) => {
       if (!nodeMap.has(loc.id)) {
@@ -150,13 +185,31 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
             </marker>
           </defs>
 
-          {/* Grid Background Lines */}
-          <g opacity="0.06">
-            {Array.from({ length: 9 }).map((_, i) => (
-              <line key={`gx-${i}`} x1={i * 100} y1="0" x2={i * 100} y2="460" stroke="#38bdf8" strokeWidth="1" />
+          {/* Subtle Grid Background Lines */}
+          <g opacity="0.04">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <line
+                key={`gx-${i}`}
+                x1={(i + 1) * 100}
+                y1="35"
+                x2={(i + 1) * 100}
+                y2="425"
+                stroke="#38bdf8"
+                strokeWidth="1"
+                strokeDasharray="2,4"
+              />
             ))}
-            {Array.from({ length: 6 }).map((_, i) => (
-              <line key={`gy-${i}`} x1="0" y1={i * 90} x2="800" y2={i * 90} stroke="#38bdf8" strokeWidth="1" />
+            {Array.from({ length: 4 }).map((_, i) => (
+              <line
+                key={`gy-${i}`}
+                x1="50"
+                y1={(i + 1) * 80 + 10}
+                x2="750"
+                y2={(i + 1) * 80 + 10}
+                stroke="#38bdf8"
+                strokeWidth="1"
+                strokeDasharray="2,4"
+              />
             ))}
           </g>
 
@@ -209,9 +262,10 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                   x2={pO.x}
                   y2={pO.y}
                   stroke="#38bdf8"
-                  strokeWidth={isSelected ? '2.5' : '1.5'}
-                  strokeDasharray="3,3"
-                  opacity={isSelected ? 1 : 0.75}
+                  strokeWidth={isSelected ? '3' : '2'}
+                  strokeDasharray="4,4"
+                  opacity={isSelected ? 1 : 0.85}
+                  className="animate-pulse"
                 />
 
                 {/* Loaded Linehaul leg (Pickup -> Destination) */}
@@ -221,10 +275,10 @@ export const NetworkCanvas: React.FC<NetworkCanvasProps> = ({
                   x2={pDest.x}
                   y2={pDest.y}
                   stroke="url(#grad-matched)"
-                  strokeWidth={isSelected ? '4' : '2.5'}
-                  filter={isSelected ? 'url(#glow)' : undefined}
+                  strokeWidth={isSelected ? '4.5' : '3'}
+                  filter="url(#glow)"
                   markerEnd="url(#arrow-matched)"
-                  opacity={isSelected ? 1 : 0.9}
+                  opacity={1}
                 />
               </g>
             );

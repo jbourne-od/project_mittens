@@ -428,9 +428,18 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 		decisionID = fmt.Sprintf("OPT_%d", req.Epoch)
 	}
 
+	policyName := prov.PolicyName
+	if policyName == "" {
+		policyName = req.PolicyClass
+	}
+	if policyName == "" {
+		policyName = "CFA"
+	}
+	runID := fmt.Sprintf("RUN-%s", policyName)
+
 	h.writeJSON(w, http.StatusOK, OptimizeResponse{
 		DecisionID:           decisionID,
-		RunID:                decisionID,
+		RunID:                runID,
 		Epoch:                req.Epoch,
 		MatchCount:           len(matches),
 		Matches:              matches,
@@ -515,8 +524,12 @@ func (h *Handler) HandleSimulate(w http.ResponseWriter, r *http.Request) {
 	}
 	facStore := model.NewFacilityStore(facs)
 
-	// Stream mapping
+	// Stream mapping relative to simulation decision step intervals
 	loadMap := make(map[int64][]model.Load)
+	stepSec := int64(req.DecisionStepHours * 3600)
+	if stepSec <= 0 {
+		stepSec = 86400
+	}
 	for _, lDTO := range req.LoadSchedule {
 		equipType := parseEquipmentType(lDTO.RequiredEquipment)
 		l := model.Load{
@@ -530,8 +543,13 @@ func (h *Handler) HandleSimulate(w http.ResponseWriter, r *http.Request) {
 			Revenue:               lDTO.Revenue,
 			RequiredEquipment:     equipType,
 		}
-		bucket := (l.PickupEarliestEpoch / 86400) * 86400
-		loadMap[bucket] = append(loadMap[bucket], l)
+		relativeSec := l.PickupEarliestEpoch - req.StartEpoch
+		if relativeSec < 0 {
+			relativeSec = 0
+		}
+		epochIndex := relativeSec / stepSec
+		targetEpoch := req.StartEpoch + epochIndex*stepSec
+		loadMap[targetEpoch] = append(loadMap[targetEpoch], l)
 	}
 	stream := service.NewStaticLoadStream(loadMap)
 

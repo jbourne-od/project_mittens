@@ -18,12 +18,16 @@ import (
 // In accordance with Section 5.4 (Semantic Journaling) and Inviolate 7 (Complete Provenance),
 // every dispatch decision is committed within a transaction verifying hash chain continuity.
 type PostgresJournalStore struct {
-	pool *Pool
+	pool       *Pool
+	memJournal *service.MemoryJournal
 }
 
 // NewPostgresJournalStore initializes a new PostgresJournalStore.
 func NewPostgresJournalStore(pool *Pool) *PostgresJournalStore {
-	return &PostgresJournalStore{pool: pool}
+	return &PostgresJournalStore{
+		pool:       pool,
+		memJournal: service.NewMemoryJournal(),
+	}
 }
 
 // Append commits a sealed JournalRecord to PostgreSQL within a transaction, verifying Merkle continuity.
@@ -215,6 +219,12 @@ func (s *PostgresJournalStore) VerifyRunChain(runID string) (bool, string, error
 		return false, "", err
 	}
 	if len(records) == 0 {
+		// Fallback: If runID is actually a decisionID, lookup the record to find its parent RunID
+		if rec, getErr := s.Get(runID); getErr == nil && rec.RunID != "" {
+			records, _ = s.ListByRun(rec.RunID)
+		}
+	}
+	if len(records) == 0 {
 		return true, "empty_run", nil
 	}
 
@@ -240,8 +250,12 @@ func (s *PostgresJournalStore) VerifyRunChain(runID string) (bool, string, error
 // service.Journal Interface Implementation
 // -----------------------------------------------------------------------------
 
-// Record persists a service.JournalEntry to PostgreSQL.
+// Record persists a service.JournalEntry to PostgreSQL and retains rich in-memory attribution.
 func (s *PostgresJournalStore) Record(ctx context.Context, entry service.JournalEntry) error {
+	if s.memJournal != nil {
+		_ = s.memJournal.Record(ctx, entry)
+	}
+
 	rec := entry.CryptographicRecord
 	if rec.DecisionID == "" {
 		rec.DecisionID = entry.DecisionID
@@ -285,6 +299,13 @@ func (s *PostgresJournalStore) Record(ctx context.Context, entry service.Journal
 
 // GetEntries returns recent recorded entries across optimization runs.
 func (s *PostgresJournalStore) GetEntries() []service.JournalEntry {
+	if s.memJournal != nil {
+		memEntries := s.memJournal.GetEntries()
+		if len(memEntries) > 0 {
+			return memEntries
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -319,6 +340,12 @@ func (s *PostgresJournalStore) GetEntries() []service.JournalEntry {
 
 // GetEntry retrieves a specific JournalEntry by its decisionID.
 func (s *PostgresJournalStore) GetEntry(decisionID string) (service.JournalEntry, bool) {
+	if s.memJournal != nil {
+		if entry, found := s.memJournal.GetEntry(decisionID); found {
+			return entry, true
+		}
+	}
+
 	rec, err := s.Get(decisionID)
 	if err != nil {
 		return service.JournalEntry{}, false

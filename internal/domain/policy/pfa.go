@@ -140,8 +140,9 @@ func (p *PFAPolicy[C]) Evaluate(
 
 			// Analytical PFA scoring rule: f_theta(driver, load)
 			score := (p.params.RevenueWeight * l.Revenue) -
-				(p.params.DeadheadWeight * deadheadMiles * p.costCfg.EmptyMileRate) -
-				(costBreakdown.FixedCost + costBreakdown.LoadedCost)
+				(p.params.DeadheadWeight * costBreakdown.EmptyCost) -
+				(p.params.DwellWeight * costBreakdown.DwellCost) -
+				(costBreakdown.FixedCost + costBreakdown.LoadedCost + costBreakdown.EmptyToHomeCost)
 
 			eval := CandidateEvaluation{
 				DriverID:      d.ID,

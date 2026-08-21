@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
@@ -207,6 +208,28 @@ func NewTournamentRunner(cfg TournamentConfig) *TournamentRunner {
 	return &TournamentRunner{cfg: cfg}
 }
 
+func renderProgress(current, total int, label string, start time.Time) {
+	if total <= 0 {
+		return
+	}
+	width := 24
+	percent := float64(current) / float64(total)
+	if percent > 1.0 {
+		percent = 1.0
+	}
+	filled := int(percent * float64(width))
+	if filled > width {
+		filled = width
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	elapsed := time.Since(start).Seconds()
+
+	fmt.Printf("\r\033[K [%s] %3.0f%% (%d/%d) | %s | Elapsed: %.1fs", bar, percent*100.0, current, total, label, elapsed)
+	if current == total {
+		fmt.Printf("\n")
+	}
+}
+
 // Run executes the complete multi-episode tournament comparing N=0 (Myopic) vs N=1 (MOMDP Belief-Filtered).
 func (r *TournamentRunner) Run(ctx context.Context) (*TournamentReport, error) {
 	startTime := time.Now()
@@ -226,6 +249,7 @@ func (r *TournamentRunner) Run(ctx context.Context) (*TournamentReport, error) {
 		default:
 		}
 
+		renderProgress(ep, cfg.Episodes, fmt.Sprintf("Episode %d/%d (N=0 vs N=1)...", ep+1, cfg.Episodes), startTime)
 		epSeed := cfg.BaseSeed + uint64(ep)*7919
 
 		// 1. Run Baseline N=0 (Myopic Monopolistic Policy)
@@ -245,6 +269,8 @@ func (r *TournamentRunner) Run(ctx context.Context) (*TournamentReport, error) {
 		if math.Abs(n0Score.NetContribution) > 1e-6 {
 			lift = (diff / math.Abs(n0Score.NetContribution)) * 100.0
 		}
+
+		renderProgress(ep+1, cfg.Episodes, fmt.Sprintf("Episode %d/%d complete (Lift: %+.1f%%)", ep+1, cfg.Episodes, lift), startTime)
 
 		epResult := EpisodeScore{
 			EpisodeIndex:               ep + 1,
@@ -749,6 +775,7 @@ func (r *TournamentRunner) RunTripartite(ctx context.Context) (*TripartiteReport
 		default:
 		}
 
+		renderProgress(ep, cfg.Episodes, fmt.Sprintf("Episode %d/%d (Tripartite)...", ep+1, cfg.Episodes), startTime)
 		epSeed := cfg.BaseSeed + uint64(ep)*7919
 
 		// 1. Run Legacy Monopolistic (N=0)
@@ -772,6 +799,8 @@ func (r *TournamentRunner) RunTripartite(ctx context.Context) (*TripartiteReport
 		nLegacy[ep] = scoreLegacy.NetContribution
 		nBlind[ep] = scoreBlind.NetContribution
 		nInformed[ep] = scoreInformed.NetContribution
+
+		renderProgress(ep+1, cfg.Episodes, fmt.Sprintf("Episode %d/%d complete", ep+1, cfg.Episodes), startTime)
 	}
 
 	tInformedVsLegacy, err := pkgmath.ComputePairedTTest(nLegacy, nInformed)
@@ -992,6 +1021,7 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 		default:
 		}
 
+		renderProgress(ep, cfg.Episodes, fmt.Sprintf("Episode %d/%d (Factorial 2x2)...", ep+1, cfg.Episodes), startTime)
 		epSeed := cfg.BaseSeed + uint64(ep)*7919
 
 		// 1. Run V00 (Legacy Action + Blind)
@@ -1019,6 +1049,8 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 		v01[ep] = s01.NetContribution
 		v10[ep] = s10.NetContribution
 		v11[ep] = s11.NetContribution
+
+		renderProgress(ep+1, cfg.Episodes, fmt.Sprintf("Episode %d/%d complete", ep+1, cfg.Episodes), startTime)
 	}
 
 	tV11VsV00, err := pkgmath.ComputePairedTTest(v00, v11)
@@ -1108,6 +1140,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		epSeed := cfg.BaseSeed + uint64(ep)*7919
 
 		// 1. PFA (Greedy Direct Contribution)
+		renderProgress(ep*5, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 1. PFA (Greedy Rule)...", ep+1, cfg.Episodes), startTime)
 		t0 := time.Now()
 		sPFA, err := r.runEpisodePFA(ctx, epSeed)
 		if err != nil {
@@ -1118,6 +1151,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		pfaNets[ep] = sPFA.NetContribution
 
 		// 2. CFA (Parametric Cost Function Approximation)
+		renderProgress(ep*5+1, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 2. CFA (SPSA LAP)...", ep+1, cfg.Episodes), startTime)
 		t0 = time.Now()
 		sCFA, err := r.runEpisodeCFA(ctx, epSeed)
 		if err != nil {
@@ -1128,6 +1162,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		cfaNets[ep] = sCFA.NetContribution
 
 		// 3. Piecewise VFA (Downstream Marginal Slopes with CAVE)
+		renderProgress(ep*5+2, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 3. VFA (CAVE Slopes)...", ep+1, cfg.Episodes), startTime)
 		t0 = time.Now()
 		sVFA, err := r.runEpisodeVFA(ctx, epSeed)
 		if err != nil {
@@ -1138,6 +1173,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		vfaNets[ep] = sVFA.NetContribution
 
 		// 4. DLA (Direct Lookahead Approximation)
+		renderProgress(ep*5+3, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 4. DLA (Tree Rollout)...", ep+1, cfg.Episodes), startTime)
 		t0 = time.Now()
 		sDLA, err := r.runEpisodeDLA(ctx, epSeed)
 		if err != nil {
@@ -1148,6 +1184,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		dlaNets[ep] = sDLA.NetContribution
 
 		// 5. Competitive POMDP (Bayesian Belief Simplex + Dynamic Pricing)
+		renderProgress(ep*5+4, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d: 5. POMDP (Simplex+Bid)...", ep+1, cfg.Episodes), startTime)
 		t0 = time.Now()
 		sPOMDP, err := r.runEpisodeN1(ctx, epSeed)
 		if err != nil {
@@ -1156,6 +1193,8 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		pomdpLatencies[ep] = float64(time.Since(t0).Microseconds()) / 1000.0 / float64((r.cfg.HorizonDays*24)/r.cfg.DecisionStepHours)
 		pomdpScores[ep] = sPOMDP
 		pomdpNets[ep] = sPOMDP.NetContribution
+
+		renderProgress((ep+1)*5, cfg.Episodes*5, fmt.Sprintf("Ep %d/%d Complete (POMDP: $%.0f)", ep+1, cfg.Episodes, sPOMDP.NetContribution), startTime)
 	}
 
 	tCFAvsPFA, _ := pkgmath.ComputePairedTTest(pfaNets, cfaNets)
@@ -1297,7 +1336,7 @@ func (r *TournamentRunner) runEpisodePFA(ctx context.Context, seed uint64) (simR
 
 	pfaParams := policy.DefaultPFAParameters()
 	costCfg := model.DefaultCostConfig()
-	costCfg.EmptyToHomeRate = 0.0
+	costCfg.EmptyToHomeRate = 0.20
 	feasCfg := model.DefaultFeasibilityConfig()
 	feasCfg.MaxDeadheadMiles = 800.0
 	pfaPol := policy.NewPFAPolicy[model.Monopolistic](pfaParams, costCfg, feasCfg)
@@ -1330,12 +1369,7 @@ func (r *TournamentRunner) runEpisodeCFA(ctx context.Context, seed uint64) (simR
 		return simResult{}, fmt.Errorf("cfa: failed creating state: %w", err)
 	}
 
-	cfaParams := policy.CFAParameters{
-		ThetaEmpty: 1.15,
-		ThetaHome:  0.20,
-		ThetaDwell: 0.85,
-		ThetaRisk:  0.0,
-	}
+	cfaParams := policy.DefaultCFAParameters()
 	costCfg := model.DefaultCostConfig()
 	costCfg.EmptyToHomeRate = 0.20
 	feasCfg := model.DefaultFeasibilityConfig()
@@ -1430,12 +1464,12 @@ func (r *TournamentRunner) runEpisodeDLA(ctx context.Context, seed uint64) (simR
 
 	cfaBase := policy.NewCFAPolicy[model.Monopolistic](policy.DefaultCFAParameters(), costCfg, feasCfg, nil)
 	dlaParams := policy.DefaultDLAParameters()
-	dlaParams.Horizon = 2
+	dlaParams.Horizon = 1
 	dlaParams.NumRollouts = 1
 	dlaParams.DiscountFactor = 0.95
 	dlaParams.StepSeconds = stepSec
 	dlaParams.RandomSeed = seed + 101
-	dlaParams.EnableAdaptivePruning = false
+	dlaParams.EnableAdaptivePruning = true
 	rm := model.NewRegionManager(1.0, nil)
 	dlaPol, err := policy.NewDLAPolicy[model.Monopolistic](dlaParams, costCfg, feasCfg, cfaBase, nil, rm, nil, nil)
 	if err != nil {

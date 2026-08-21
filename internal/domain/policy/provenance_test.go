@@ -217,9 +217,6 @@ func TestPolicies_ProvenanceCompletenessAcrossAllBranches(t *testing.T) {
 	}
 }
 
-// faultyConcurrentFilter generates candidate arcs pointing to missing drivers/loads to test fail-closed integrity
-type mockBrokenState struct{}
-
 func TestPolicies_FailClosedMissingEntityLookups(t *testing.T) {
 	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
 	locAtl := model.Location{NodeID: "ATL", Lat: 33.7490, Lon: -84.3880}

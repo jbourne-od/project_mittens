@@ -1178,7 +1178,7 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 	policies := []FourWayPolicyMetric{
 		{
 			PolicyClass:         "1. PFA",
-			Description:         "Greedy Direct Dispatch",
+			Description:         "Myopic Direct Contribution",
 			MeanNetContribution: meanPFA.NetContribution,
 			MeanGrossRevenue:    meanPFA.GrossRevenue,
 			MeanOperatingCost:   meanPFA.OperatingCost,

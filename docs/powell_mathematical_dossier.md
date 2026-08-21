@@ -9,9 +9,13 @@
 
 ## 1. Executive Summary & The Formal Family of Decision Models $\mathcal{M}_N$
 
-Project Mittens models dynamic carrier dispatch and freight revenue management using the **Sequential Decision Analytics (SDA)** framework (Powell, 2022). 
+Project Mittens models dynamic carrier dispatch and freight revenue management under uncertainty using the **Sequential Decision Analytics (SDA)** framework (Powell, 2022).
 
-To eliminate any ambiguity between monopolistic fleet dispatch and competitive market bidding, we define the **parametric family of sequential decision models** $\mathcal{M}_N$ indexed by competitor fleet dimension $N \in \mathbb{N}_0$:
+The core thesis of Project Mittens is twofold:
+1. **Canonical Subsumption:** The monopolistic carrier dispatch problem ($N=0$) is strictly isomorphic to Powell's canonical SDA formulation.
+2. **Competitive Generalization:** For $N \ge 1$, Mittens generalizes the state space to a Partially Observable Markov Decision Process (MOMDP/POMDP) with endogenous pricing levers and recursive Bayesian belief tracking.
+
+To formalize this, we define the **parametric family of sequential decision models** $\mathcal{M}_N$ indexed by competitor fleet dimension $N \in \mathbb{N}_0$:
 
 $$\mathcal{M}_N = \left( \mathcal{S}_N, \mathcal{A}_N, \mathcal{W}_N, \mathbb{P}_N, K_N, C_N \right), \quad N \in \mathbb{N}_0$$
 
@@ -58,10 +62,10 @@ Thus $\mathcal{M}_0$ is strictly isomorphic to the canonical Powell fleet manage
 
 ---
 
-### 1.2 The Competitor Parameter $N \ge 1$ & Conditional i.i.d. Auction Model
-For $N \ge 1$, $N$ represents the integer count of competitor fleets in the regional spot market. 
+### 1.2 The Competitor Parameter $N \ge 1$ & Order-Statistic Auction Model
+For $N \ge 1$, $N$ represents the integer count of competitor fleets active in the regional spot market.
 * **Aggregate Competitor Capacity:** $\mathcal{C}_N = N \cdot \bar{c}$, where $\bar{c}$ is the mean capacity per competitor fleet.
-* **Conditional i.i.d. Bid Distribution:** Assuming competitor bid prices $B_1, \dots, B_N$ are **conditionally independent and identically distributed** given the latent market posture $\Theta_t = \theta_k \in \mathcal{H}_N = \{\theta_1, \dots, \theta_K\}$ (with common macroeconomic factors absorbed by $\Theta_t$):
+* **Conditional i.i.d. Continuous Bids:** Assuming competitor bid prices $B_1, \dots, B_N$ are drawn from a continuous distribution $F_{\text{single}}(p \mid \theta)$ (so ties occur with probability zero) and are **conditionally independent and identically distributed** given the latent posture $\Theta_t = \theta_k \in \mathcal{H}_N = \{\theta_1, \dots, \theta_K\}$ (with common macroeconomic drivers absorbed by $\Theta_t$):
   $$\Pr\left( B_1 > p_\ell, \dots, B_N > p_\ell \;\middle|\; \theta_k, N \right) = \prod_{i=1}^N \Pr(B_i > p_\ell \mid \theta_k) = \left[ 1 - F_{\text{single}}(p_\ell \mid \theta_k) \right]^N$$
 * **Tender Win Probability:**
   $$q_\ell(p_\ell, b_t \mid N) = \sum_{k=1}^K b_t(\theta_k) \cdot \left[ 1 - F_{\text{single}}(p_\ell \mid \theta_k) \right]^N$$
@@ -150,9 +154,9 @@ In accordance with Powell (2022, Chapters 11–20), policies are divided into **
 
 ### 3.1 Policy Function Approximations (PFAs — Chapter 12)
 * **Definition:** Direct analytical state-to-action functions $X^{\text{PFA}}(S_t \mid \theta) = f_\theta(S_t)$ evaluated **without solving an embedded optimization model**.
-* **Implementation (`internal/domain/policy/pfa.go`):** A **constructive greedy algorithm** $f_\theta(S_t)$ producing a feasible matching directly via deterministic priority rules without solving an optimization problem over the global feasible set $\mathcal{X}_t$:
+* **Implementation (`internal/domain/policy/pfa.go`):** A **constructive greedy algorithm** $f_\theta(S_t)$ producing a feasible matching directly via deterministic priority sorting without solving an optimization model over the global feasible set $\mathcal{X}_t$:
   $$\text{Score}(d, \ell \mid \theta) = \theta_{\text{rev}} \cdot r_\ell - \theta_{\text{dist}} \cdot \text{Deadhead}(d, \ell) - \text{Costs}(d, \ell)$$
-* **Computational Complexity:** $\mathcal{O}(|\mathcal{D}_t| \log |\mathcal{D}_t| + |\mathcal{D}_t| \cdot |\mathcal{L}_t|)$ (sorting availability + greedy linear assignment).
+* **Computational Complexity:** $\mathcal{O}(|\mathcal{D}_t| \log |\mathcal{D}_t| + |\mathcal{D}_t| \cdot |\mathcal{L}_t|)$ (sorting availability + greedy linear scan).
 * **Latency:** $0.06\text{ ms}$ (pure array traversal, zero matrix solvers).
 
 ---
@@ -172,36 +176,55 @@ In accordance with Powell (2022, Chapters 11–20), policies are divided into **
   where $\bar{V}_{t, r}(n) = \sum_{k=1}^n \bar{v}_{t, r}(k)$ is the total value of having $n$ drivers terminating in region $r$, and $\bar{v}_{t, r}(1) \ge \bar{v}_{t, r}(2) \ge \dots \ge \bar{v}_{t, r}(K)$ are non-increasing marginal slopes.
 
 #### Theorem 2A (Exact Minimum-Cost Network Flow Formulation for Committed Freight):
-For committed freight, separable piecewise-linear concave regional value functions $\bar{V}(R_t^x) = \sum_r \bar{V}_r(R_{t, r}^x)$ yield an **exact Minimum-Cost Network Flow (MCNF)** problem on a directed graph $G = (\mathcal{V}, \mathcal{E})$.
+For committed freight, separable piecewise-linear concave regional value functions $\bar{V}(R_t^x) = \sum_r \bar{V}_r(R_{t, r}^x)$ yield an **exact Minimum-Cost Network Flow (MCNF)** on a directed flow network $G = (\mathcal{V}, \mathcal{E})$.
 *Proof Construction:*  
-Construct a 3-layer flow network: Driver source nodes $\mathcal{D}_t$ (supply $+1$), Load intermediate nodes $\mathcal{L}_t$, and Regional marginal value sink nodes $\mathcal{S}_{\mathcal{R}} = \{ (r, k) \mid r \in \mathcal{R}, k = n_r^0 + 1, \dots, n_r^0 + |\mathcal{D}_t| \}$ (demand $-1$, unit capacity $u = 1$, reward $\bar{v}_r(k)$). Because slopes are monotonically non-increasing ($\bar{v}_r(k) \ge \bar{v}_r(k+1)$), any standard MCNF solver saturates slots in index order. By total unimodularity of the node-arc incidence matrix, all extreme points are integer, guaranteeing exact polynomial solvability in $\mathcal{O}(|V||E|\log|V|)$. *(In local single-driver regional approximations, this reduces directly to the standard bipartite LAP solved via Jonker-Volgenant).* $\blacksquare$
+Construct the directed flow network $G = (\mathcal{V}, \mathcal{E})$ from source $s$ to sink $t$:
+1. **Source $s$:** Supply $+|\mathcal{D}_t|$.
+2. **Driver Nodes $d \in \mathcal{D}_t$:** Arcs $(s, d)$ with capacity $u_{s, d} = 1$, cost $0$.
+3. **Idle/Dummy Arcs:** Arcs $(d, t)$ with capacity $1$, cost $0$, permitting unassigned drivers to remain idle without penalty.
+4. **Load Split Nodes $\ell \in \mathcal{L}_t$:** To enforce 1-to-1 matching, split each load into $\ell^{\text{in}} \to \ell^{\text{out}}$ with arc capacity $u_{\ell^{\text{in}}, \ell^{\text{out}}} = 1$, cost $0$. Driver-load arcs $(d, \ell^{\text{in}})$ have capacity $1$ and cost $-C(d, \ell)$.
+5. **Regional Marginal Slot Nodes $(r, k)$:** For $r \in \mathcal{R}$ and $k = n_r^0 + 1, \dots, n_r^0 + |\mathcal{D}_t|$, arc $(\ell^{\text{out}}, (r, k))$ exists if $r = \text{dest}(\ell)$ with capacity $1$, cost $0$.
+6. **Terminal Arcs to Sink $t$:** Arcs $((r, k), t)$ have capacity $u_{(r, k), t} = 1$ and cost $-\gamma \bar{v}_r(k)$. Sink $t$ has demand $-|\mathcal{D}_t|$.
 
-#### Proposition 2B (Separable First-Order Approximation for Joint Pricing and Dispatch):
-For competitive spot tenders with stochastic win outcomes, assume:
-1. *Tender Independence:* $q_\ell$ depends only on $(p_\ell, b_t, N)$, independent of prices submitted on other tenders.
-2. *Absence of Portfolio Bid Constraints:* No global volume caps coupling bids across tenders.
-3. *Edge-Local Reservation Costs:* $c^{\text{reserve}}_{d, \ell}$ is local to edge $(d, \ell)$.
-
-**Lemma 2B.1 (Edgewise Bid Decoupling):**  
-Under Hypotheses 1–3, the joint pricing and matching optimization decomposes into an inner scalar price optimization followed by an outer assignment:
-$$w_{d, \ell}^* = \max_{p_\ell \in \mathcal{P}_\ell} \left\{ q_\ell(p_\ell, b_t \mid N) \left[ p_\ell - c^{\text{exec}}_{d, \ell} + \gamma \left( \bar{v}_{\text{dest}(\ell)}(n_{\text{dest}}^0 + 1) - \bar{v}_{\text{orig}(d)}(n_{\text{orig}}^0) \right) \right] - c^{\text{reserve}}_{d, \ell} \right\}$$
-The optimal joint policy is given by:
-$$x^* = \arg\max_{x \in \mathcal{X}_t} \sum_{d \in \mathcal{D}_t} \sum_{\ell \in \mathcal{L}_t} w_{d, \ell}^* x_{d, \ell}, \qquad p_{d, \ell}^* = \arg\max_{p \in \mathcal{P}_\ell} w_{d, \ell}(p)$$
-preserving linear bipartite assignment structure over $x$ with pre-optimized scalar edge weights $w_{d, \ell}^*$. $\blacksquare$
-
-#### Dual Gauge Normalization & Economic Supergradient Identification:
-In bipartite matching with slack nodes for unassigned assets, setting the slack dual gauge $v_{\text{slack}} = 0$ eliminates additive translation invariance ($u_i \leftarrow u_i + c, v_j \leftarrow v_j - c$). Under this normalization, any optimal dual vector $u^* \in \partial^* z$ selected by the solver defines a valid normalized **supergradient** $\hat{v}_{t, d} = u_d^*$ of the concave value function with respect to driver capacity, providing valid stochastic supergradient samples for CAVE leveling (`internal/service/vfa_learner.go`) under standard Robbins-Monro step-size sequences.
+Because marginal slopes are non-increasing ($\bar{v}_r(k) \ge \bar{v}_r(k+1) \implies -\gamma \bar{v}_r(k) \le -\gamma \bar{v}_r(k+1)$), any min-cost flow algorithm saturates slot $(r, k)$ before $(r, k+1)$. By total unimodularity of the node-arc incidence matrix, all extreme points are integer. Using the **successive shortest path algorithm with node potentials**, the exact integer optimum is computed in $\mathcal{O}(|\mathcal{D}_t| \cdot |\mathcal{E}| \log |\mathcal{V}|)$. *(In local single-driver regional approximations, this reduces directly to the standard bipartite LAP solved via Jonker-Volgenant).* $\blacksquare$
 
 ---
 
-### 3.4 Direct Lookahead Approximations (DLAs — Chapters 19–20)
+### 3.4 The Competitive POMDP Model & Belief-Aware Approximate Policy
+In the full competitive problem ($N \ge 1$), the true belief-state continuation value involves joint epistemic updates:
+$$\mathbb{E}\left[ \bar{V}(R_{t+1}, b_{t+1}) \;\middle|\; R_t, b_t, x_t, p_t \right]$$
+Because auction outcomes from multiple simultaneous tenders update a single shared market belief vector $b_{t+1} = \tau(b_t, p_t, O_{t+1})$, the future epistemic value of information $\mathbb{E}[V_b(b_{t+1})]$ does not decouple edgewise across loads.
+
+In accordance with Powell's SDA paradigm, Project Mittens **models the market as a POMDP/MOMDP**, but operates it via a **Belief-Aware Approximate Policy (Class 2 CFA / Class 3 VFA Hybrid)**:
+$$\tilde{V}(S_t, x, p) = \tilde{V}_R(R_t, x, p ; b_t)$$
+where $b_t$ supplies win probabilities and posterior risk adjustments for the current epoch, while the physical continuation value $\bar{V}_R$ evaluates post-decision driver inventories without explicitly pricing multi-step epistemic information gains.
+
+#### Proposition 2B (Separable First-Order Approximation for Joint Pricing and Dispatch):
+**Lemma 2B.1 (Sufficient Conditions for Exact Edgewise Bid Decoupling):**  
+Under the following three sufficient hypotheses:
+1. *Tender Independence:* $q_\ell$ depends only on $(p_\ell, b_t, N)$, independent of prices on other tenders $\ell' \ne \ell$.
+2. *Absence of Portfolio Bid Constraints:* No global fleet-wide volume caps coupling bids across tenders.
+3. *Edge-Local Reservation Costs:* $c^{\text{reserve}}_{d, \ell}$ is local to edge $(d, \ell)$.
+
+The joint pricing and matching optimization decomposes into an inner scalar price optimization followed by an outer assignment:
+$$w_{d, \ell}^* = \max_{p_\ell \in \mathcal{P}_\ell} \left\{ q_\ell(p_\ell, b_t \mid N) \left[ p_\ell - c^{\text{exec}}_{d, \ell} + \gamma \left( \bar{v}_{\text{dest}(\ell)}(n_{\text{dest}}^0 + 1) - \bar{v}_{\text{orig}(d)}(n_{\text{orig}}^0) \right) \right] - c^{\text{reserve}}_{d, \ell} \right\}$$
+The optimal joint policy is given by:
+$$x^* = \arg\max_{x \in \mathcal{X}_t} \sum_{d \in \mathcal{D}_t} \sum_{\ell \in \mathcal{L}_t} w_{d, \ell}^* x_{d, \ell}, \qquad p_{d, \ell}^* = \arg\max_{p \in \mathcal{P}_\ell} w_{d, \ell}(p)$$
+preserving exact linear bipartite assignment structure over $x$ with pre-optimized scalar edge weights $w_{d, \ell}^*$. $\blacksquare$
+
+#### Dual Gauge Normalization & Sample-Path Supergradients:
+In bipartite matching with slack nodes for unassigned assets, setting the slack dual gauge $v_{\text{slack}} = 0$ eliminates additive translation invariance ($u_i \leftarrow u_i + c, v_j \leftarrow v_j - c$). Under this normalization, any optimal dual vector $u^{*, n} \in \partial^+ z(R_t; W^{(n)})$ defines a valid **sample-path supergradient** of the realized linear program. Under standard dominated-integrability regularity conditions ($\mathbb{E}[u^{*, n} \mid R_t] \in \partial^+ \bar{z}(R_t)$), these sample potentials provide valid stochastic supergradient estimates for CAVE leveling (`internal/service/vfa_learner.go`) with Robbins-Monro step-size sequences.
+
+---
+
+### 3.5 Direct Lookahead Approximations (DLAs — Chapters 19–20)
 * **Definition:** Rolling-horizon optimization over truncated future horizon $H$:
   $$X^{\text{DLA}}(S_t) = \arg\max_{x_t \in \mathcal{X}_t} \left( C(S_t, x_t) + \mathbb{E}_{\tilde{W}} \left[ \sum_{t'=t+1}^{t+H} \gamma^{t'-t} C(\tilde{S}_{t'}, X^{\text{Base}}(\tilde{S}_{t'})) \right] \right)$$
 * **Implementation (`internal/domain/policy/dla.go`):** Forward Monte Carlo trajectory rollouts across parallel goroutines with UCT tree search.
 
 ---
 
-### 3.5 Four Policy Classes Summary
+### 3.6 Four Policy Classes Summary
 
 | Policy Class | Powell Chapter | Optimization Mechanism | Embedded Solver | Training | Latency |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -237,7 +260,9 @@ $$\begin{array}{r|cc|c}
 
 #### Factorial Analysis & Option Value Interpretation:
 1. **The Negative Marginal Information Effect ($V_{01} - V_{00} = -\$121.09$):**  
-   In cell $V_{01}$, pricing is disabled ($\mathcal{P}_t^0 = \{\varnothing\}$), but the dispatch policy incorporates the belief vector $b_t$ via a **belief-sensitive risk adjustment** ($\theta_{\text{risk}} \cdot \text{Var}(b_t)$ in CFA) to avoid dispatching drivers into lanes forecast to experience intense competitor congestion. Under fixed contract tariffs, this defensive posture slightly suppresses accepted load volume in volatile regimes without the ability to demand compensatory tariffs, causing a minor observed sample drag ($-\$121.09$).
+   In cell $V_{01}$, pricing is disabled ($\mathcal{P}_t^0 = \{\varnothing\}$), but the dispatch policy incorporates the belief vector $b_t$ via a **lane-specific posterior risk variance penalty**:
+   $$\text{Penalty}_\ell(b_t) = \theta_{\text{risk}} \cdot \text{Var}_{\Theta \sim b_t}\left[ g_\ell(\Theta) \right] = \theta_{\text{risk}} \sum_{k=1}^K b_t(\theta_k) \left( g_\ell(\theta_k) - \bar{g}_\ell(b_t) \right)^2$$
+   where $g_\ell(\theta_k)$ represents lane congestion risk under posture $\theta_k$. Under fixed contractual tariffs, this defensive posture slightly suppresses accepted load volume in volatile regimes without the pricing flexibility to demand compensatory premiums, producing a minor observed sample drag ($-\$121.09$).
 2. **Supermodular Interaction ($\Delta_{\text{int}} = +\$3,719.52$, $p < 10^{-4}$):**  
    When market intelligence is coupled with the pricing lever ($V_{11}$), the carrier monetizes the information by raising rates on high-risk lanes, converting defensive avoidance into highly profitable targeted bidding ($+\$3,598.43$ marginal lift).
 3. **Factorial Main Effects:**
@@ -250,7 +275,7 @@ $$\begin{array}{r|cc|c}
 ## 5. Direct Answers to Committee Defense Inquiries
 
 1. **“Show me where $N$ occurs in your stochastic model, rather than your prose.”**  
-   *Answer:* In $\mathcal{M}_N$, $N$ explicitly parameterizes the aggregate competitor capacity $\mathcal{C}_N = N \cdot \bar{c}$ and the order-statistic tender win probability $q_\ell(p_\ell, b_t \mid N) = \sum_k b_t(\theta_k) [1 - F_{\text{single}}(p_\ell \mid \theta_k)]^N$ under conditionally i.i.d. competitor bids. For $N=0$, $\mathcal{H}_0 = \{\Theta_\emptyset\}$, $\Delta(\mathcal{H}_0) = \{\delta_{\Theta_\emptyset}\}$, $\mathcal{P}_0 = \{\varnothing\}$, and $O_{t+1} = \varnothing$.
+   *Answer:* In $\mathcal{M}_N$, $N$ explicitly parameterizes the aggregate competitor capacity $\mathcal{C}_N = N \cdot \bar{c}$ and the order-statistic tender win probability $q_\ell(p_\ell, b_t \mid N) = \sum_k b_t(\theta_k) [1 - F_{\text{single}}(p_\ell \mid \theta_k)]^N$ under conditionally i.i.d. continuous competitor bids. For $N=0$, $\mathcal{H}_0 = \{\Theta_\emptyset\}$, $\Delta(\mathcal{H}_0) = \{\delta_{\Theta_\emptyset}\}$, $\mathcal{P}_0 = \{\varnothing\}$, and $O_{t+1} = \varnothing$.
 2. **“At $N=0$, what is $p_\ell$ in $\text{Revenue}(p_\ell)$, given that you just removed the pricing action?”**  
    *Answer:* At $N=0$, pricing is exogenous: revenue is the predetermined contract rate $r_\ell$. For $N \ge 1$, revenue is determined endogenously by submitted bid price $p_\ell \in \mathcal{P}_t$.
 3. **“How do you assign a driver to a tender at $t$ when the observation that you won the tender arrives at $t+1$?”**  
@@ -258,4 +283,4 @@ $$\begin{array}{r|cc|c}
 4. **“Prove that setting $\theta=0$ in your CFA produces the deadhead-minimizing PFA you claim it implements.”**  
    *Answer:* PFA is the **Constructive Greedy Priority Dispatch Rule** $X^{\text{PFA}}(S_t \mid \theta) = f_\theta(S_t)$ (Section 3.1, Chapter 12), which performs zero LAP optimization. Setting $\theta = 0$ in CFA recovers the **Myopic Base Optimization Policy** $X^{\text{Myopic}}(S_t) = \arg\max_{x \in \mathcal{X}_t} C(S_t, x)$ (Chapter 13).
 5. **“Why is the particular Jonker-Volgenant row potential $u_d$, which may depend on dual normalization, the economically identified marginal value of an additional resource?”**  
-   *Answer:* By **Dual Gauge Normalization** (Section 3.3). In bipartite matching with slack nodes for unassigned assets, fixing $v_{\text{slack}} = 0$ eliminates shift invariance, identifying $u_d^* \in \partial^* z$ as a valid normalized **supergradient** of the concave value function with respect to driver capacity.
+   *Answer:* By **Dual Gauge Normalization** (Section 3.3). In bipartite matching with slack nodes for unassigned assets, fixing $v_{\text{slack}} = 0$ eliminates shift invariance, identifying $u_d^{*, n} \in \partial^+ z(R_t; W^{(n)})$ as a valid normalized **sample-path supergradient** of the concave value function with respect to driver capacity.

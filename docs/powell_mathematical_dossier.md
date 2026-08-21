@@ -310,18 +310,18 @@ $$\Delta_{I \mid \text{comp}} - \Delta_{I \mid \text{legacy}} = \$2,175.89 - (-\
 > *The economic value of competitive information is endogenous to the carrier's decision flexibility and resource scarcity:*
 > $$\Delta_{\text{int}} = f(\text{Horizon } H, \text{Market Tender Density } \lambda, \text{Fleet Capacity } K)$$
 
-#### Empirical Comparative Statics Sweeps:
+#### Empirical Comparative Statics Sweeps ($N = 500$ Paired Episodes per Grid Cell):
 
 | Grid Sweep Setting | Horizon | Drivers | Loads/Epoch | Ratio (Loads:Trucks) | Mean Interaction $\Delta_{\text{int}}$ | 95% Confidence Interval | $t$-Statistic | $p$-Value | Total Mittens Lift |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Grid 1 (Long Horizon)** | **30 Days** | 10 | 15 | $1.5 : 1$ | **+$2,575.43** | $[+\$1,983.20, +\$3,167.67]$ | $+8.63$ | $1.05 \times 10^{-13}$ | $+3.00\%$ |
-| **Grid 2 (High Market Density)** | 7 Days | 10 | **25** | **$2.5 : 1$** | **+$3,922.45** | $[+\$3,155.08, +\$4,689.83]$ | $+10.08$ | $1.42 \times 10^{-19}$ | **+23.26%** |
-| **Grid 3 (Tight Fleet Capacity)** | 7 Days | **15** | 15 | **$1.0 : 1$** | **+$1,871.58** | $[+\$1,459.84, +\$2,283.33]$ | $+8.97$ | $2.27 \times 10^{-16}$ | **+13.80%** |
+| **Grid 1 (Long Horizon)** | **30 Days** | 10 | 15 | $1.5 : 1$ | **+$2,404.44** | $[+\$2,166.35, +\$2,642.54]$ | $+19.85$ | $4.86 \times 10^{-65}$ | $+1.62\%$ |
+| **Grid 2 (High Market Density)** | 7 Days | 10 | **25** | **$2.5 : 1$** | **+$4,053.99** | $[+\$3,582.38, +\$4,525.61]$ | $+16.89$ | $5.83 \times 10^{-51}$ | **+28.11%** |
+| **Grid 3 (Tight Fleet Capacity)** | 7 Days | **15** | 15 | **$1.0 : 1$** | **+$2,010.79** | $[+\$1,740.52, +\$2,281.07]$ | $+14.62$ | $1.51 \times 10^{-40}$ | **+11.66%** |
 | **Baseline Benchmark** | 7 Days | 10 | 15 | $1.5 : 1$ | **+$2,184.40** | $[+\$1,950.12, +\$2,418.68]$ | $+18.29$ | $3.24 \times 10^{-64}$ | **+16.44%** |
 
-1. **Market Density Magnifies Pricing Leverage:** Under high tender flow ($2.5 : 1$, Grid 2), the carrier has the option volume to cherry-pick high-margin loads, driving interaction $\Delta_{\text{int}}$ to **+$3,922.45** and net margin lift to **+23.26%**.
-2. **Horizon Compounding:** Over a 30-day horizon (Grid 1), ignorance compounds into severe cumulative losses ($-\$2,272.07$), while informed pricing extracts a massive information premium ($+\$2,644.88$, Cohen's $d_z = 0.8631$).
-3. **Tight Capacity Robustness:** Even under tight 1:1 capacity constraints (Grid 3), supermodular complementarity on the treatment lattice remains highly statistically significant ($\Delta_{\text{int}} = +\$1,871.58, p = 2.27 \times 10^{-16}$).
+1. **Market Density / Scarcity Magnifies Complementarity:** Under high tender flow ($2.5 : 1$, Grid 2), the carrier has the option volume to cherry-pick high-margin loads, driving interaction $\Delta_{\text{int}}$ to **+$4,053.99** ($p = 5.83 \times 10^{-51}$) and total Mittens lift to **+28.11%** ($+\$4,477.09, p = 2.56 \times 10^{-30}$).
+2. **Horizon Compounding:** Over a 30-day horizon (Grid 1), unguided pricing flexibility compounds into massive value destruction ($-\$2,233.58, t = -61.12, p = 7.59 \times 10^{-234}$), whereas market intelligence monetizes this flexibility to capture a massive information return ($+\$2,432.86, t = +20.13, p = 2.10 \times 10^{-66}$, Cohen's $d_z = 0.8875$).
+3. **Tight Capacity Robustness:** Even under tight 1:1 capacity constraints (Grid 3), supermodular complementarity on the treatment lattice remains highly statistically significant ($\Delta_{\text{int}} = +\$2,010.79, t = +14.62, p = 1.51 \times 10^{-40}$).
 
 ---
 

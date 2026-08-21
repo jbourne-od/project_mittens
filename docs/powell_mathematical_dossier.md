@@ -245,7 +245,7 @@ Therefore, $\mathbb{E}[u^*(W) \mid I_t] \in \partial^+ \bar{z}(R \mid I_t)$, pro
 
 ---
 
-## 4. Value of Information: Theoretical Foundations & Large-Sample Empirical Analysis
+## 4. Value of Information & Supermodular Complementarity on the Treatment Lattice
 
 ### 4.1 Theoretical Value of Information via Policy-Set Supremum
 $$\sup_{\pi \in \Pi^{\text{informed}}} \mathbb{E}[V^\pi] \ge \sup_{\pi \in \Pi^{\text{blind}}} \mathbb{E}[V^\pi]$$
@@ -255,44 +255,156 @@ Let $\mathcal{F}_t^{\text{blind}} = \sigma(R_{0:t}, I_{0:t}, b_0)$ and $\mathcal
 
 ---
 
-### 4.2 Large-Sample Empirical $2 \times 2$ Factorial Decomposition ($N_{\text{episodes}} = 1,000$, Horizon $= 7\text{ Days}$)
+### 4.2 Large-Sample Empirical $2 \times 2$ Factorial Scorecard ($N = 1,000$ Paired Episodes, 7-Day Horizon)
 
-While Theorem 3 guarantees non-negative Value of Information for the *theoretical supremum over all policies*, operational systems implement specific algorithmic heuristics (CFAs and POMDPs). To measure the empirical effects, we independently ablate **market belief filtering** (blind prior $b_0$ vs. informed posterior $b_t$) and **action space flexibility** (legacy fixed tariff $\mathcal{P}^{\text{fixed}}$ vs. competitive pricing $\mathcal{P}^{\text{flex}}$) across $N = 1,000$ paired Monte Carlo simulation episodes ($df = 999$):
+While Theorem 3 guarantees non-negative Value of Information for the *theoretical supremum over all policies*, operational systems implement specific algorithmic heuristics (CFAs and POMDPs). Holding the competitive market environment fixed at $N = 1$, we independently ablate **market belief filtering** (blind prior $b_0$ vs. informed posterior $b_t$) and **action space flexibility** (legacy fixed tariff $\mathcal{P}^{\text{fixed}}$ vs. competitive flexible pricing $\mathcal{P}^{\text{flex}}$) across $N = 1,000$ paired Monte Carlo simulation episodes ($df = 999$):
 
 $$\begin{array}{r|cc|c}
 & \textbf{Blind Belief } (b_0) & \textbf{Informed Belief } (b_t) & \textbf{Marginal Information Effect} \\
 \hline
-\textbf{Legacy Fixed Tariff } (\mathcal{P}^{\text{fixed}}) & V_{00} = \$10,154.20 & V_{01} = \$10,145.69 & \Delta_{I \mid \text{legacy}} = -\$8.51 \quad (p = 0.763) \\
-\textbf{Competitive Flexible Pricing } (\mathcal{P}^{\text{flex}}) & V_{10} = \$9,648.08 & V_{11} = \$11,823.97 & \Delta_{I \mid \text{comp}} = +\$2,175.89 \quad (p < 10^{-100}) \\
+\textbf{Legacy Action } (\mathcal{P}^{\text{fixed}}) & V_{00} = \$10,154.20 & V_{01} = \$10,145.69 & \Delta_{I \mid \text{legacy}} = -\$8.51 \quad (p = 0.763) \\
+\textbf{Competitive Action } (\mathcal{P}^{\text{flex}}) & V_{10} = \$9,648.08 & V_{11} = \$11,823.97 & \Delta_{I \mid \text{comp}} = +\$2,175.89 \quad (p < 10^{-100}) \\
 \hline
 \textbf{Marginal Action Effect} & \Delta_{A \mid \text{blind}} = -\$506.12 & \Delta_{A \mid \text{informed}} = +\$1,678.28 & \textbf{Total Mittens Lift: } +\$1,669.76 \text{ (+16.44\%)}
 \end{array}$$
 
 #### Paired Episode Statistical Contrasts & Hypothesis Tests ($N = 1,000$):
 
-| Contrast | Description | Mean Effect | 95% Confidence Interval | $t$-Statistic | Two-Sided $p$-Value | Cohen's $d_z$ | Economic Interpretation |
+| Contrast | Description | Mean Effect | 95% Confidence Interval | $t$-Statistic | Two-Sided $p$-Value | Cohen's $d_z$ | Economic Takeaway |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| $\Delta_{I \mid \text{legacy}} = V_{01} - V_{00}$ | Info Effect under Legacy Policy | **-$8.51** | $[-\$63.86, +\$46.83]$ | $-0.30$ | $0.763$ | $-0.0095$ | **Information alone does essentially nothing ($V_{01} \approx V_{00}$)** |
-| $\Delta_{A \mid \text{blind}} = V_{10} - V_{00}$ | Action Effect under Blind Belief | **-$506.12** | $[-\$723.70, -\$288.55]$ | $-4.56$ | $5.6 \times 10^{-6}$ | $-0.1442$ | **Pricing flexibility without info actively hurts** |
-| $\Delta_{I \mid \text{comp}} = V_{11} - V_{10}$ | Info Effect under Competitive Policy | **+$2,175.89** | $[+\$1,997.99, +\$2,353.78]$ | $+24.03$ | $6.5 \times 10^{-101}$ | $+0.7599$ | **Information is enormously valuable with pricing** |
+| $\Delta_{I \mid \text{legacy}} = V_{01} - V_{00}$ | Info Effect under Legacy Policy | **-$8.51** | $[-\$63.86, +\$46.83]$ | $-0.30$ | $0.763$ | $-0.0095$ | **Information has essentially zero standalone operational value ($84.3\%$ exact ties)** |
+| $\Delta_{A \mid \text{blind}} = V_{10} - V_{00}$ | Action Effect under Blind Belief | **-$506.12** | $[-\$723.70, -\$288.55]$ | $-4.56$ | $5.6 \times 10^{-6}$ | $-0.1442$ | **Pricing flexibility without information actively hurts** |
+| $\Delta_{I \mid \text{comp}} = V_{11} - V_{10}$ | Info Effect under Competitive Policy | **+$2,175.89** | $[+\$1,997.99, +\$2,353.78]$ | $+24.03$ | $6.5 \times 10^{-101}$ | $+0.7599$ | **Information is enormously valuable with pricing lever** |
 | $\Delta_{A \mid \text{informed}} = V_{11} - V_{01}$ | Action Effect under Informed Belief | **+$1,678.28** | $[+\$1,427.70, +\$1,928.86]$ | $+13.12$ | $1.2 \times 10^{-36}$ | $+0.4150$ | **Pricing lever delivers large lift under informed state** |
 | $V_{11} - V_{00}$ | **Total Project Mittens Advantage** | **+$1,669.76** | $[+\$1,419.48, +\$1,920.05]$ | $+13.06$ | $2.84 \times 10^{-36}$ | $+0.4131$ | **Full Mittens beats legacy baseline by +16.44%** |
 
 ---
 
-### 4.3 Supermodular Complementarity Test ($\Delta_{\text{int}}$)
+### 4.3 Positive Factorial Cross-Effect (Empirical Complementarity on Treatment Lattice)
 For each simulation episode $i \in \{1, \dots, N\}$, we compute the exact paired interaction contrast:
 $$D_i = (V_{11, i} - V_{10, i}) - (V_{01, i} - V_{00, i})$$
 Across $N = 1,000$ paired episodes:
-* **Sample Mean Interaction:** $\bar{D} = +\$2,184.40$ ($\text{SD} = \$3,778.60, \text{SE} = \$119.49$)
+* **Mean Interaction Effect:** $\bar{D} = +\$2,184.40$ ($\text{SD} = \$3,778.60, \text{SE} = \$119.49$)
 * **95% Paired Confidence Interval:** $[+\$1,950.12, +\$2,418.68]$
 * **Hypothesis Test:** $t = +18.29$, $df = 999$, $p(\text{two-tailed}) = 3.24 \times 10^{-64}$, Cohen's $d_z = 0.5781$
-* **Episode Sign Distribution:** Positive Complementarity in $78.2\%$ of episodes ($782/1000$), Negative in $6.8\%$ ($68/1000$), Exact Tie in $15.0\%$ ($150/1000$).
+* **Episode Attribution:** Positive Complementarity in $78.2\%$ of episodes ($782/1000$), Negative in $6.8\%$ ($68/1000$), Exact Tie in $15.0\%$ ($150/1000$).
 
-#### Core Economic Conclusions:
-1. **$\boxed{\text{Information without the competitive lever does essentially nothing}}$** ($\Delta_{I \mid \text{legacy}} = -\$8.51, p = 0.763$): Under fixed contract tariffs, knowing competitor posture does not alter matching decisions unless risk variance crosses an extreme dispatch boundary ($75\%$ of episodes produce identical dispatch paths).
-2. **$\boxed{\text{The competitive lever without information actively hurts}}$** ($\Delta_{A \mid \text{blind}} = -\$506.12, p = 5.6 \times 10^{-6}$): Attempting dynamic spot pricing with a static uninformative belief prior leads to systematic mispricing (underbidding in passive regimes, overbidding in aggressive regimes).
-3. **$\boxed{\text{Information + competitive action produces supermodular value}}$** ($\Delta_{\text{int}} = +\$2,184.40, p = 3.24 \times 10^{-64}$): Market intelligence provides the accurate win-probability gradient needed to monetize dynamic pricing, generating a statistically overwhelming $+16.44\%$ economic gain.
+#### Main Effects & Shapley Attribution of Joint Surplus:
+$$\text{ME}_{\text{Action}} = \frac{1}{2}[(V_{10} - V_{00}) + (V_{11} - V_{01})] = +\$586.08 \quad (35.1\%)$$
+$$\text{ME}_{\text{Info}} = \frac{1}{2}[(V_{01} - V_{00}) + (V_{11} - V_{10})] = +\$1,083.69 \quad (64.9\%)$$
+$$\text{ME}_{\text{Action}} + \text{ME}_{\text{Info}} = \$1,669.77 = V_{11} - V_{00}$$
+*Note: For two factors on a treatment lattice, the main effects equal the Shapley allocations of the total $\$1,669.76$ gain. The interaction demonstrates that these are allocations of a joint surplus generated by supermodular complementarity on the lattice ($V_{11} + V_{00} > V_{10} + V_{01}$), rather than independently additive contributions.*
+
+#### Core Economic Mechanism:
+> **$\boxed{\text{Pricing flexibility changes the return to information.}}$**
+$$\Delta_{I \mid \text{comp}} - \Delta_{I \mid \text{legacy}} = \$2,175.89 - (-\$8.51) = +\$2,184.40$$
+* Without the pricing lever, knowing the competitor posture mostly cannot be monetized ($84.3\%$ exact dispatch ties).
+* Once the carrier can condition bid prices and selective acceptance on $b_t$, the identical information is worth $+\$2,176$ per week.
+* Conversely, exercising pricing flexibility without information actively destroys value ($-\$506.12$, $p = 5.6 \times 10^{-6}$) due to systematic mispricing. **Information has value because it changes the marginal return to an available action.**
+
+---
+
+## 4.4 Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes)
+
+> **Empirical Proposition 4 (Treatment-Lattice Complementarity Across Operating Regimes):**  
+> *Competitive market information and pricing/dispatch flexibility exhibit positive treatment-lattice complementarity across all tested operating regimes. The magnitude of this complementarity is governed jointly by market density, absolute scale/thickness, and horizon duration:*
+> $$\Delta_{\text{int}} = f\left(\frac{\lambda}{K}, \lambda, K, H\right), \quad \Delta_{\text{int}} \ne f\left(\frac{\lambda}{K}\right) \text{ alone.}$$
+
+#### Evidence Hierarchy & Experimental Design:
+We organize our empirical findings into a two-tier research hierarchy:
+1. **Confirmatory High-Powered Experiments ($N = 500$ to $N = 1,000$ paired episodes):** Establish tightly estimated baseline benchmarks and primary regime contrasts.
+2. **Exploratory Continuous Response Surfaces ($N = 100$ paired episodes per grid cell, 18 parameter points):** Map the underlying response-surface shapes across tender flow $\lambda \in [10, 30]$, fleet size $K \in [6, 20]$, and horizon $H \in [3, 30]$ days, testing paired stepwise finite differences $\delta_{\theta, i} = D_i(\theta_{j+1}) - D_i(\theta_j)$ with exact Student-$t$ quantiles ($df = 99$).
+
+#### Confirmatory Grid Experiments ($N = 500$ to $N = 1,000$ Paired Episodes):
+
+| Grid Setting | Horizon | Drivers $K$ | Loads $\lambda$ | Ratio ($\lambda : K$) | Mean Interaction $\Delta_{\text{int}}$ | 95% Confidence Interval | $t$-Statistic | $p$-Value | Total Mittens Lift |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Grid 1 (Long Horizon, $N=500$)** | **30 Days** | 10 | 15 | $1.5 : 1$ | **+$2,404.44** | $[+\$2,166.35, +\$2,642.54]$ | $+19.85$ | $4.86 \times 10^{-65}$ | $+1.62\%$ |
+| **Grid 2 (High Market Density, $N=500$)** | 7 Days | 10 | **25** | **$2.5 : 1$** | **+$4,053.99** | $[+\$3,582.38, +\$4,525.61]$ | $+16.89$ | $5.83 \times 10^{-51}$ | **+28.11%** |
+| **Grid 3 (Balanced Capacity, $N=500$)** | 7 Days | **15** | 15 | **$1.0 : 1$** | **+$2,010.79** | $[+\$1,740.52, +\$2,281.07]$ | $+14.62$ | $1.51 \times 10^{-40}$ | **+11.66%** |
+| **Baseline Benchmark ($N=1,000$)** | 7 Days | 10 | 15 | $1.5 : 1$ | **+$2,184.40** | $[+\$1,950.12, +\$2,418.68]$ | $+18.29$ | $3.24 \times 10^{-64}$ | **+16.44%** |
+
+#### Key Analytical Conclusions:
+1. **Scarcity Ratio Is Not Sufficient; Evidence of a Market-Scale/Thickness Effect:**  
+   The response curves empirically refute the naive 1D hypothesis that complementarity depends solely on the ratio $\lambda/K$.
+   * At identical scarcity ratio $2.5 : 1$: an absolute scale of $(25\text{ loads}, 10\text{ trucks})$ yields $\Delta_{\text{int}} = +\$4,390.81$ (+$4,053.99$ at $N=500$), whereas $(15\text{ loads}, 6\text{ trucks})$ yields only $\Delta_{\text{int}} = +\$2,478.24$.
+   * At identical scarcity ratio $1.0 : 1$: an absolute scale of $(10\text{ loads}, 10\text{ trucks})$ yields $\Delta_{\text{int}} = +\$1,311.72$, whereas $(15\text{ loads}, 15\text{ trucks})$ yields $\Delta_{\text{int}} = +\$2,056.78$ (+$2,010.79$ at $N=500$).
+   * Absolute scale matters in addition to scarcity ratio. This is consistent with thicker markets offering richer combinatorial assignment options, expanding the option value of pricing flexibility and competitor intelligence.
+2. **Dynamic Transience, Sign Reversal, and Saturation of Horizon Effects:**  
+   * At short horizon ($H = 3\text{ days}$), blind competitive pricing yields a positive value of action ($\Delta_{A \mid \text{blind}} = +\$1,349.48$, $+\$449.83/\text{day}$).
+   * Between $3$ and $7$ days, this action effect reverses sign ($\Delta_{A \mid \text{blind}} = -\$837.08$ at $7\text{d}$), and its cumulative disadvantage then plateaus over longer horizons ($-\$837 \to -\$2,105 \to -\$2,246 \to -\$2,272$).
+   * Meanwhile, the informed competitive premium ($\Delta_{I \mid \text{comp}}$) expands rapidly from $+\$1,852.37$ ($3\text{d}$) to $+\$2,447.22$ ($7\text{d}$) and saturates at $\sim +\$2,645$ ($+\$2,629 \to +\$2,632 \to +\$2,645$).
+   * *Economic Structure:* **Competitive flexibility is initially beneficial when blind, but reverses sign between 3 and 7 days and its cumulative disadvantage then saturates.** In the short horizon, extra flexibility itself helps; over longer horizons, uninformed flexibility becomes harmful; market information largely offsets that longer-run degradation, with most of its cumulative surplus realized relatively early.
+   * *Working Hypothesis:* The observed saturation is consistent with an initial learning/transient-allocation regime followed by a stationary filtering and dispatch regime in which incremental information rents are small. (Future telemetry logging epoch-by-epoch posterior entropy $H(b_t)$, calibration, policy action divergence, and driver spatial distributions will directly test this causal channel).
+3. **Exploratory Finite Differences & Multiple-Testing Discipline:**  
+   Across the $N=100$ exploratory sweep with exact Student-$t$ intervals ($df=99, t_{\text{crit}} \approx 1.984$), only the $\lambda: 18 \to 20$ transition is nominally significant at the unadjusted 5% level ($p = 0.0119$). However, across the family of six adjacent density tests, Bonferroni correction yields $\alpha^* = 0.05 / 6 \approx 0.00833$, under which no individual adjacent step remains statistically significant (and none survives Benjamini-Hochberg FDR control). For capacity $K$, no adjacent step is distinguishable from zero even unadjusted ($p \in [0.32, 0.96]$).  
+   *Methodological Takeaway:* **Response surfaces suggest shape; they do not establish local derivatives.** The interaction levels vary materially across operating regimes, with broad evidence of greater complementarity in denser markets, but $N=100$ exploratory finite differences are too noisy to assert monotone local slopes $\frac{\partial \Delta}{\partial \lambda} > 0$ or $\frac{\partial \Delta}{\partial K} < 0$. This reinforces our two-tier research hierarchy: broad sweeps map response-surface shapes, while high-powered confirmatory runs ($N \ge 500$) establish definitive inference on primary operating points.
+
+---
+
+### 4.5 Second-Order Empirical Response Surfaces & Paired Finite Difference Sweeps
+
+#### 1. Tender Density Response Curve (Holding $H = 7\text{ Days}, K = 10\text{ Drivers}$, $N = 100$ per point):
+
+| Tender Flow $\lambda$ | Scarcity Ratio | Legacy Blind $V_{00}$ | Mittens $V_{11}$ | Total Mittens Lift | Conditional VoI $\Delta_{I \mid \text{comp}}$ | Interaction $\Delta_{\text{int}}$ | 95% Confidence Interval | $\Delta_{\text{int}} / \text{Day}$ |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **10** | $1.00 : 1$ | $\$6,663.47$ | $\$7,576.90$ | $+\$913.43\text{ (+13.7\%)}$ | $+\$1,353.76$ | **+$1,311.72** | $[+\$921.54, +\$1,701.89]$ | $+\$187.39/\text{d}$ |
+| **12** | $1.20 : 1$ | $\$8,230.37$ | $\$9,750.06$ | $+\$1,519.69\text{ (+18.5\%)}$ | $+\$2,019.88$ | **+$1,973.56** | $[+\$1,432.29, +\$2,514.84]$ | $+\$281.94/\text{d}$ |
+| **15** | $1.50 : 1$ | $\$10,545.20$ | $\$12,155.33$ | $+\$1,610.14\text{ (+15.3\%)}$ | $+\$2,447.22$ | **+$2,490.18** | $[+\$1,846.74, +\$3,133.62]$ | $+\$355.74/\text{d}$ |
+| **18** | $1.80 : 1$ | $\$11,778.42$ | $\$14,189.44$ | $+\$2,411.02\text{ (+20.5\%)}$ | $+\$2,409.36$ | **+$1,981.36** | $[+\$1,034.58, +\$2,928.14]$ | $+\$283.05/\text{d}$ |
+| **20** | $2.00 : 1$ | $\$13,616.50$ | $\$16,655.92$ | $+\$3,039.42\text{ (+22.3\%)}$ | $+\$3,524.74$ | **+$3,703.42** | $[+\$2,763.07, +\$4,643.78]$ | $+\$529.06/\text{d}$ |
+| **25** | $2.50 : 1$ | $\$16,699.15$ | $\$20,948.71$ | $+\$4,249.56\text{ (+25.4\%)}$ | $+\$4,444.63$ | **+$4,390.81** | $[+\$3,149.41, +\$5,632.21]$ | $+\$627.26/\text{d}$ |
+| **30** | $3.00 : 1$ | $\$17,334.76$ | $\$24,110.51$ | $+\$6,775.74\text{ (+39.1\%)}$ | $+\$4,138.21$ | **+$3,933.78** | $[+\$2,769.72, +\$5,097.85]$ | $+\$561.97/\text{d}$ |
+
+#### Paired Stepwise Finite Differences Across Density Steps ($\delta_{\lambda, i} = D_i(\lambda_{j+1}) - D_i(\lambda_j)$, exact $df=99$ Student-$t$ CIs):
+
+| Transition | Mean $\Delta(\text{Interaction})$ | 95% Student-$t$ Confidence Interval | $t$-Statistic | Two-Sided $p$-Value |
+| :---: | :---: | :---: | :---: | :---: |
+| $\lambda: 10 \to 12$ | **+$661.84** | $[-\$5.25, +\$1,328.94]$ | $+1.97$ | $0.0518$ |
+| $\lambda: 12 \to 15$ | **+$516.62** | $[-\$324.03, +\$1,357.26]$ | $+1.22$ | $0.2256$ |
+| $\lambda: 15 \to 18$ | **-$508.82** | $[-\$1,653.29, +\$635.66]$ | $-0.88$ | $0.3798$ |
+| $\lambda: 18 \to 20$ | **+$1,722.06** | $[+\$387.95, +\$3,056.18]$ | $+2.56$ | **0.0119** |
+| $\lambda: 20 \to 25$ | **+$687.38** | $[-\$869.62, +\$2,244.39]$ | $+0.88$ | $0.3832$ |
+| $\lambda: 25 \to 30$ | **-$457.03** | $[-\$2,158.45, +\$1,244.39]$ | $-0.53$ | $0.5952$ |
+
+---
+
+#### 2. Fleet Capacity Response Curve (Holding $H = 7\text{ Days}, \lambda = 15\text{ Loads/Epoch}$, $N = 100$ per point):
+
+| Fleet Capacity $K$ | Scarcity Ratio | Legacy Blind $V_{00}$ | Mittens $V_{11}$ | Total Mittens Lift | Conditional VoI $\Delta_{I \mid \text{comp}}$ | Interaction $\Delta_{\text{int}}$ | 95% Confidence Interval | $\Delta_{\text{int}} / \text{Day}$ |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **6** | $2.50 : 1$ | $\$8,655.35$ | $\$11,626.30$ | $+\$2,970.95\text{ (+34.3\%)}$ | $+\$2,614.36$ | **+$2,478.24** | $[+\$1,802.90, +\$3,153.58]$ | $+\$354.03/\text{d}$ |
+| **8** | $1.88 : 1$ | $\$9,315.68$ | $\$11,997.20$ | $+\$2,681.52\text{ (+28.8\%)}$ | $+\$2,402.19$ | **+$2,278.84** | $[+\$1,526.74, +\$3,030.94]$ | $+\$325.55/\text{d}$ |
+| **10** | $1.50 : 1$ | $\$10,545.20$ | $\$12,155.33$ | $+\$1,610.14\text{ (+15.3\%)}$ | $+\$2,447.22$ | **+$2,490.18** | $[+\$1,846.74, +\$3,133.62]$ | $+\$355.74/\text{d}$ |
+| **12** | $1.25 : 1$ | $\$10,263.45$ | $\$12,072.10$ | $+\$1,808.65\text{ (+17.6\%)}$ | $+\$2,382.62$ | **+$2,468.99** | $[+\$1,919.39, +\$3,018.59]$ | $+\$352.71/\text{d}$ |
+| **15** | $1.00 : 1$ | $\$10,513.40$ | $\$12,121.22$ | $+\$1,607.82\text{ (+15.3\%)}$ | $+\$2,082.65$ | **+$2,056.78** | $[+\$1,432.29, +\$2,681.26]$ | $+\$293.83/\text{d}$ |
+| **20** | $0.75 : 1$ | $\$11,135.14$ | $\$12,198.24$ | $+\$1,063.10\text{ ( +9.5\%)}$ | $+\$1,890.47$ | **+$1,971.55** | $[+\$1,302.77, +\$2,640.32]$ | $+\$281.65/\text{d}$ |
+
+#### Paired Stepwise Finite Differences Across Capacity Steps ($\delta_{K, i} = D_i(K_{j+1}) - D_i(K_j)$, exact $df=99$ Student-$t$ CIs):
+
+| Transition | Mean $\Delta(\text{Interaction})$ | 95% Student-$t$ Confidence Interval | $t$-Statistic | Two-Sided $p$-Value |
+| :---: | :---: | :---: | :---: | :---: |
+| $K: 6 \to 8$ | **-$199.40** | $[-\$1,209.98, +\$811.19]$ | $-0.39$ | $0.6963$ |
+| $K: 8 \to 10$ | **+$211.34** | $[-\$778.22, +\$1,200.90]$ | $+0.42$ | $0.6727$ |
+| $K: 10 \to 12$ | **-$21.18** | $[-\$867.21, +\$824.84]$ | $-0.05$ | $0.9605$ |
+| $K: 12 \to 15$ | **-$412.21** | $[-\$1,243.92, +\$419.49]$ | $-0.98$ | $0.3278$ |
+| $K: 15 \to 20$ | **-$85.23** | $[-\$1,000.04, +\$829.57]$ | $-0.18$ | $0.8537$ |
+
+---
+
+#### 3. Horizon Response Curve & Saturation of Transients ($K = 10\text{ Drivers}, \lambda = 15\text{ Loads/Epoch}$, $N = 100$ per point):
+
+| Horizon $H$ | Total Mittens Lift | $\Delta_{I \mid \text{comp}}\text{ (Tot)}$ | $\Delta_{I \mid \text{comp}} / \text{Day}$ | $\Delta_{A \mid \text{blind}}\text{ (Tot)}$ | $\Delta_{A \mid \text{blind}} / \text{Day}$ | $\Delta_{\text{int}}\text{ (Tot)}$ | $\Delta_{\text{int}} / \text{Day}$ |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **3 Days** | $+\$3,201.85\text{ (+47.4\%)}$ | $+\$1,852.37$ | $+\$617.46/\text{d}$ | **+$1,349.48** | **+$449.83/d** | $+\$1,842.32$ | **+$614.11/d** |
+| **7 Days** | $+\$1,610.14\text{ (+15.3\%)}$ | $+\$2,447.22$ | $+\$349.60/\text{d}$ | **-$837.08** | **-$119.58/d** | $+\$2,490.18$ | **+$355.74/d** |
+| **14 Days** | $+\$524.44\text{ ( +4.3\%)}$ | $+\$2,629.14$ | $+\$187.80/\text{d}$ | **-$2,104.70** | **-$150.34/d** | $+\$2,587.12$ | **+$184.79/d** |
+| **21 Days** | $+\$386.67\text{ ( +3.1\%)}$ | $+\$2,632.20$ | $+\$125.34/\text{d}$ | **-$2,245.53** | **-$106.93/d** | $+\$2,568.43$ | **+$122.31/d** |
+| **30 Days** | $+\$372.82\text{ ( +3.0\%)}$ | $+\$2,644.88$ | $+\$88.16/\text{d}$ | **-$2,272.07** | **-$75.74/d** | $+\$2,578.28$ | **+$85.94/d** |
+
+$$\text{Exact Arithmetic Identity: } \underbrace{(V_{11} - V_{00})}_{\text{Total Lift}} = \underbrace{(V_{10} - V_{00})}_{\Delta_{A \mid \text{blind}}(\text{Tot})} + \underbrace{(V_{11} - V_{10})}_{\Delta_{I \mid \text{comp}}(\text{Tot})}$$
+
+---
 
 ---
 

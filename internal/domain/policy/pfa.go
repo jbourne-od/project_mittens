@@ -45,10 +45,10 @@ func DefaultPFAParameters() PFAParameters {
 //
 //	X^{PFA}(S_t | \theta) = f_\theta(S_t)
 type PFAPolicy[C model.CompetitorScale] struct {
-	params    PFAParameters
-	costCfg   model.CostConfig
-	feasCfg   model.FeasibilityConfig
-	filter    *feasibility.ConcurrentFilter
+	params  PFAParameters
+	costCfg model.CostConfig
+	feasCfg model.FeasibilityConfig
+	filter  *feasibility.ConcurrentFilter
 }
 
 // NewPFAPolicy constructs a validated Policy Function Approximation policy.

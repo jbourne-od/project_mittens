@@ -9,7 +9,7 @@ Thumbs.db
 
 # Binaries and build artifacts
 bin/
-dist/
+/dist/
 *.exe
 *.exe~
 *.dll
@@ -26,6 +26,8 @@ scratch/
 .venv/
 .cache/
 node_modules/
-web/dist/
+web/dist/*
+!web/dist/index.html
 web/node_modules/
+.agents/
 

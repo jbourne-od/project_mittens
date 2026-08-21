@@ -57,6 +57,13 @@ COPY --from=go-builder /bin/mittens-opt /usr/local/bin/mittens-opt
 COPY --from=go-builder /bin/mittens-tournament /usr/local/bin/mittens-tournament
 COPY --from=go-builder /src/api/openapi.yaml /etc/project-mittens/openapi.yaml
 
+# Copy static frontend assets
+COPY --from=web-builder /web/dist /var/www/mittens/dist
+
+# Configure static assets location for embedded HTTP server
+ENV MITTENS_STATIC_DIR=/var/www/mittens/dist
+
+
 # Non-root user (distroless nonroot UID=65532, GID=65532)
 USER nonroot:nonroot
 

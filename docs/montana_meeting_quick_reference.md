@@ -25,20 +25,39 @@ From the repository root (`/Users/jacob/Development/od/project_mittens`):
 ./bin/tournament -mode 4way -episodes 10 -days 5
 ```
 * **What it shows:** Side-by-side scorecard of all 4 policy classes plus the competitive POMDP.
-* **Key Talking Point:** Point out how PFA evaluates in $0.06\text{ ms}$ (pure greedy rule), CFA/VFA solve in $0.5\text{ ms}$ via Jonker-Volgenant / MCNF, DLA runs forward Monte Carlo rollouts in $100\text{ ms}$, and the Competitive POMDP delivers $+136\%$ net contribution lift by jointly optimizing dispatch and spot bidding.
+* **Key Talking Point:** Point out how PFA evaluates in $0.09\text{ ms}$ (pure greedy rule), CFA/VFA solve in $1.2\text{ ms}$ via Jonker-Volgenant / MCNF, DLA runs forward lookahead in $25\text{ ms}$, and the Competitive POMDP jointly optimizes dispatch and spot bidding.
 
 ### Demo 2: The $2 \times 2$ Factorial Option Value & Value of Information
 ```bash
-./bin/tournament -mode factorial
+./bin/tournament -mode factorial -episodes 50
 ```
 * **What it shows:** Full $2 \times 2$ matrix isolating **pricing flexibility** ($\mathcal{P}^{\text{fixed}}$ vs $\mathcal{P}^{\text{flex}}$) and **market intelligence** ($b_0$ vs $b_t$).
-* **Key Talking Point:** Point out the supermodular interaction ($\Delta_{\text{int}} = +\$3,719.52$, $p < 10^{-4}$)—market intelligence has immense economic value *precisely because* the carrier possesses the pricing lever to monetize it.
+* **Key Talking Point:** Point out the supermodular interaction ($\Delta_{\text{int}} = +\$2,184.40$, $p < 10^{-60}$)—market intelligence has immense economic value *precisely because* the carrier possesses the pricing lever to monetize it.
 
 ### Demo 3: Monopolistic Reduction vs. Competitive Superiority
 ```bash
-./bin/tournament -mode pairwise
+./bin/tournament -mode pairwise -episodes 20
 ```
 * **What it shows:** Direct head-to-head comparison of $N=0$ monopolistic dispatch vs $N=1$ competitive MOMDP matching.
+
+---
+
+## 3. Key Empirical Findings (N = 1,000 Large-Sample Monte Carlo)
+
+| Empirical Contrast | Mean Effect | 95% Confidence Interval | Two-Sided $p$-Value | Economic Takeaway |
+| :--- | :---: | :---: | :---: | :--- |
+| $\Delta_{I \mid \text{legacy}} = V_{01} - V_{00}$ | **-$8.51** | $[-\$63.86, +\$46.83]$ | $0.763$ | **Information alone does essentially nothing ($V_{01} \approx V_{00}$)** |
+| $\Delta_{A \mid \text{blind}} = V_{10} - V_{00}$ | **-$506.12** | $[-\$723.70, -\$288.55]$ | $5.6 \times 10^{-6}$ | **Pricing lever without information actively hurts** |
+| $\Delta_{I \mid \text{comp}} = V_{11} - V_{10}$ | **+$2,175.89** | $[+\$1,997.99, +\$2,353.78]$ | $6.5 \times 10^{-101}$ | **Information is enormously valuable with pricing lever** |
+| $\Delta_{A \mid \text{informed}} = V_{11} - V_{01}$ | **+$1,678.28** | $[+\$1,427.70, +\$1,928.86]$ | $1.2 \times 10^{-36}$ | **Pricing lever delivers large lift under informed state** |
+| $V_{11} - V_{00}$ | **+$1,669.76** | $[+\$1,419.48, +\$1,920.05]$ | $2.84 \times 10^{-36}$ | **Full Project Mittens beats legacy by +16.44%** |
+
+### Supermodular Complementarity ($\Delta_{\text{int}} = D_i$):
+* **Mean Interaction Effect:** $\bar{D} = +\$2,184.40$ ($95\%\text{ CI}: [+\$1,950.12, +\$2,418.68]$, $t = +18.29$, $p = 3.24 \times 10^{-64}$, Cohen's $d_z = 0.5781$).
+* **Robustness Across Market Environments $\Delta_{\text{int}} = f(\text{horizon}, \text{market density})$:**
+  - **High Load Density (25 loads / 10 drivers):** $\Delta_{\text{int}} = +\$3,922.45$ ($p = 1.42 \times 10^{-19}$, lift = **+23.26%**).
+  - **30-Day Long Horizon:** $\Delta_{\text{int}} = +\$2,575.43$ ($p = 1.05 \times 10^{-13}$, Cohen's $d_z = 0.8631$).
+  - **1:1 Tight Fleet Capacity (15 drivers / 15 loads):** $\Delta_{\text{int}} = +\$1,871.58$ ($p = 2.27 \times 10^{-16}$, lift = **+13.80%**).
 
 ---
 

@@ -128,7 +128,7 @@ func main() {
 			slog.Error("Factorial 2x2 tournament failed", "error", err)
 			os.Exit(1)
 		}
-		fmt.Println("\n" + rep.Factorial.SummaryString())
+		fmt.Print("\n" + rep.SummaryString())
 		fmt.Printf(" Execution Wall-Clock Time: %.2f seconds\n", rep.ExecutionDurationSec)
 		fmt.Println("================================================================================")
 		exportData = rep

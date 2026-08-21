@@ -245,39 +245,54 @@ Therefore, $\mathbb{E}[u^*(W) \mid I_t] \in \partial^+ \bar{z}(R \mid I_t)$, pro
 
 ---
 
-## 4. Value of Information: Theoretical Theorem & Empirical Factorial Analysis
+## 4. Value of Information: Theoretical Foundations & Large-Sample Empirical Analysis
 
-### 4.1 Theorem 3 (Pure Value of Information via Policy-Set Inclusion):
+### 4.1 Theoretical Value of Information via Policy-Set Supremum
 $$\sup_{\pi \in \Pi^{\text{informed}}} \mathbb{E}[V^\pi] \ge \sup_{\pi \in \Pi^{\text{blind}}} \mathbb{E}[V^\pi]$$
 
 *Proof:*  
-Let $\mathcal{F}_t^{\text{blind}} = \sigma(R_{0:t}, I_{0:t}, b_0)$ and $\mathcal{F}_t^{\text{informed}} = \sigma(R_{0:t}, I_{0:t}, O_{1:t}, b_t)$. Because the informed policy observes auction feedback $O_{1:t}$, the filtrations satisfy $\mathcal{F}_t^{\text{blind}} \subseteq \mathcal{F}_t^{\text{informed}}$. Both policies choose from the identical action space $\mathcal{A}_t = \mathcal{X}_t \times \mathcal{P}_t$. Any policy adapted to $\mathcal{F}_t^{\text{blind}}$ is trivially adapted to $\mathcal{F}_t^{\text{informed}}$, establishing strict policy-set inclusion $\Pi^{\text{blind}} \subseteq \Pi^{\text{informed}}$. The supremum inequality follows immediately. $\blacksquare$
+Let $\mathcal{F}_t^{\text{blind}} = \sigma(R_{0:t}, I_{0:t}, b_0)$ and $\mathcal{F}_t^{\text{informed}} = \sigma(R_{0:t}, I_{0:t}, O_{1:t}, b_t)$. Because the informed policy observes auction feedback $O_{1:t}$, the filtration satisfies $\mathcal{F}_t^{\text{blind}} \subseteq \mathcal{F}_t^{\text{informed}}$. Both policies choose from the identical physical action space $\mathcal{A}_t = \mathcal{X}_t \times \mathcal{P}_t$. Any policy adapted to $\mathcal{F}_t^{\text{blind}}$ is trivially adapted to $\mathcal{F}_t^{\text{informed}}$, establishing strict policy-set inclusion $\Pi^{\text{blind}} \subseteq \Pi^{\text{informed}}$. The supremum inequality follows immediately. $\blacksquare$
 
 ---
 
-### 4.2 Empirical $2 \times 2$ Factorial Decomposition in Competitive Markets ($N = N^* \ge 1$)
-Holding the competitive market environment fixed at $N = N^* \ge 1$, we independently ablate **information tracking** (blind prior $b_0$ vs. informed posterior $b_t$) and **pricing control** (fixed tariff $\mathcal{P}^{\text{fixed}} = \{p^{\text{tariff}}\}$ vs. flexible bid pricing $\mathcal{P}^{\text{flex}} = [\underline{p}, \bar{p}]$) across 100 paired 7-day carrier simulation episodes ($N=100$, $df=99$):
+### 4.2 Large-Sample Empirical $2 \times 2$ Factorial Decomposition ($N_{\text{episodes}} = 1,000$, Horizon $= 7\text{ Days}$)
+
+While Theorem 3 guarantees non-negative Value of Information for the *theoretical supremum over all policies*, operational systems implement specific algorithmic heuristics (CFAs and POMDPs). To measure the empirical effects, we independently ablate **market belief filtering** (blind prior $b_0$ vs. informed posterior $b_t$) and **action space flexibility** (legacy fixed tariff $\mathcal{P}^{\text{fixed}}$ vs. competitive pricing $\mathcal{P}^{\text{flex}}$) across $N = 1,000$ paired Monte Carlo simulation episodes ($df = 999$):
 
 $$\begin{array}{r|cc|c}
-& \textbf{Blind Belief } (b_0) & \textbf{Informed Belief } (b_t) & \textbf{Marginal VoI} \\
+& \textbf{Blind Belief } (b_0) & \textbf{Informed Belief } (b_t) & \textbf{Marginal Information Effect} \\
 \hline
-\textbf{Fixed Tariff } (\mathcal{P}^{\text{fixed}}) & V_{00} = \$16,418.54 & V_{01} = \$16,297.45 & -\$121.09 \\
-\textbf{Flexible Pricing } (\mathcal{P}^{\text{flex}}) & V_{10} = \$16,567.82 & V_{11} = \$20,166.25 & +\$3,598.43 \\
+\textbf{Legacy Fixed Tariff } (\mathcal{P}^{\text{fixed}}) & V_{00} = \$10,154.20 & V_{01} = \$10,145.69 & \Delta_{I \mid \text{legacy}} = -\$8.51 \quad (p = 0.763) \\
+\textbf{Competitive Flexible Pricing } (\mathcal{P}^{\text{flex}}) & V_{10} = \$9,648.08 & V_{11} = \$11,823.97 & \Delta_{I \mid \text{comp}} = +\$2,175.89 \quad (p < 10^{-100}) \\
 \hline
-\textbf{Marginal VoA} & +\$149.28 & +\$3,868.80 & \text{Total Lift: } +\$3,747.71
+\textbf{Marginal Action Effect} & \Delta_{A \mid \text{blind}} = -\$506.12 & \Delta_{A \mid \text{informed}} = +\$1,678.28 & \textbf{Total Mittens Lift: } +\$1,669.76 \text{ (+16.44\%)}
 \end{array}$$
 
-#### Factorial Analysis & Option Value Interpretation:
-1. **The Negative Marginal Information Effect ($V_{01} - V_{00} = -\$121.09$):**  
-   In cell $V_{01}$, pricing is held fixed ($\mathcal{P}^{\text{fixed}}$), but the dispatch policy incorporates belief $b_t$ via a **lane-specific posterior risk variance penalty**:
-   $$\text{Penalty}_\ell(b_t) = \theta_{\text{risk}} \cdot \text{Var}_{\Theta \sim b_t}\left[ g_\ell(\Theta) \right] = \theta_{\text{risk}} \sum_{k=1}^K b_t(\theta_k) \left( g_\ell(\theta_k) - \bar{g}_\ell(b_t) \right)^2$$
-   where $g_\ell(\theta_k)$ represents lane congestion pressure under posture $\theta_k$. Under fixed contractual tariffs, this defensive posture slightly suppresses accepted load volume in volatile regimes without the pricing flexibility to demand compensatory premiums, producing a minor observed sample drag ($-\$121.09$).
-2. **Supermodular Interaction ($\Delta_{\text{int}} = +\$3,719.52$, $p < 10^{-4}$):**  
-   When market intelligence is coupled with the pricing lever ($V_{11}$), the carrier monetizes the information by raising rates on high-risk lanes, converting defensive avoidance into highly profitable targeted bidding ($+\$3,598.43$ marginal lift).
-3. **Factorial Main Effects:**
-   $$\text{ME}_{\text{Action}} = \frac{1}{2}[(V_{10} - V_{00}) + (V_{11} - V_{01})] = +\$2,009.04 \quad (53.6\%)$$
-   $$\text{ME}_{\text{Info}} = \frac{1}{2}[(V_{01} - V_{00}) + (V_{11} - V_{10})] = +\$1,738.67 \quad (46.4\%)$$
-4. **Shapley Value Attribution:** $\Phi_{\text{Action}} = \$2,009.04$ ($53.6\%$), $\Phi_{\text{Info}} = \$1,738.67$ ($46.4\%$).
+#### Paired Episode Statistical Contrasts & Hypothesis Tests ($N = 1,000$):
+
+| Contrast | Description | Mean Effect | 95% Confidence Interval | $t$-Statistic | Two-Sided $p$-Value | Cohen's $d_z$ | Economic Interpretation |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| $\Delta_{I \mid \text{legacy}} = V_{01} - V_{00}$ | Info Effect under Legacy Policy | **-$8.51** | $[-\$63.86, +\$46.83]$ | $-0.30$ | $0.763$ | $-0.0095$ | **Information alone does essentially nothing ($V_{01} \approx V_{00}$)** |
+| $\Delta_{A \mid \text{blind}} = V_{10} - V_{00}$ | Action Effect under Blind Belief | **-$506.12** | $[-\$723.70, -\$288.55]$ | $-4.56$ | $5.6 \times 10^{-6}$ | $-0.1442$ | **Pricing flexibility without info actively hurts** |
+| $\Delta_{I \mid \text{comp}} = V_{11} - V_{10}$ | Info Effect under Competitive Policy | **+$2,175.89** | $[+\$1,997.99, +\$2,353.78]$ | $+24.03$ | $6.5 \times 10^{-101}$ | $+0.7599$ | **Information is enormously valuable with pricing** |
+| $\Delta_{A \mid \text{informed}} = V_{11} - V_{01}$ | Action Effect under Informed Belief | **+$1,678.28** | $[+\$1,427.70, +\$1,928.86]$ | $+13.12$ | $1.2 \times 10^{-36}$ | $+0.4150$ | **Pricing lever delivers large lift under informed state** |
+| $V_{11} - V_{00}$ | **Total Project Mittens Advantage** | **+$1,669.76** | $[+\$1,419.48, +\$1,920.05]$ | $+13.06$ | $2.84 \times 10^{-36}$ | $+0.4131$ | **Full Mittens beats legacy baseline by +16.44%** |
+
+---
+
+### 4.3 Supermodular Complementarity Test ($\Delta_{\text{int}}$)
+For each simulation episode $i \in \{1, \dots, N\}$, we compute the exact paired interaction contrast:
+$$D_i = (V_{11, i} - V_{10, i}) - (V_{01, i} - V_{00, i})$$
+Across $N = 1,000$ paired episodes:
+* **Sample Mean Interaction:** $\bar{D} = +\$2,184.40$ ($\text{SD} = \$3,778.60, \text{SE} = \$119.49$)
+* **95% Paired Confidence Interval:** $[+\$1,950.12, +\$2,418.68]$
+* **Hypothesis Test:** $t = +18.29$, $df = 999$, $p(\text{two-tailed}) = 3.24 \times 10^{-64}$, Cohen's $d_z = 0.5781$
+* **Episode Sign Distribution:** Positive Complementarity in $78.2\%$ of episodes ($782/1000$), Negative in $6.8\%$ ($68/1000$), Exact Tie in $15.0\%$ ($150/1000$).
+
+#### Core Economic Conclusions:
+1. **$\boxed{\text{Information without the competitive lever does essentially nothing}}$** ($\Delta_{I \mid \text{legacy}} = -\$8.51, p = 0.763$): Under fixed contract tariffs, knowing competitor posture does not alter matching decisions unless risk variance crosses an extreme dispatch boundary ($75\%$ of episodes produce identical dispatch paths).
+2. **$\boxed{\text{The competitive lever without information actively hurts}}$** ($\Delta_{A \mid \text{blind}} = -\$506.12, p = 5.6 \times 10^{-6}$): Attempting dynamic spot pricing with a static uninformative belief prior leads to systematic mispricing (underbidding in passive regimes, overbidding in aggressive regimes).
+3. **$\boxed{\text{Information + competitive action produces supermodular value}}$** ($\Delta_{\text{int}} = +\$2,184.40, p = 3.24 \times 10^{-64}$): Market intelligence provides the accurate win-probability gradient needed to monetize dynamic pricing, generating a statistically overwhelming $+16.44\%$ economic gain.
 
 ---
 

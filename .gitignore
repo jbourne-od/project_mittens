@@ -36,5 +36,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-
-
+# Benchmark outputs
+tournament_results.json
+grid*.json

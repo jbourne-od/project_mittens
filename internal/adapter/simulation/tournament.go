@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
@@ -90,34 +92,39 @@ func (d TripartiteDecomposition) SummaryString() string {
 
 // FactorialDecomposition2x2 encapsulates the full 2x2 factorial experimental evaluation.
 type FactorialDecomposition2x2 struct {
-	V00_LegacyBlind           float64 `json:"v00_legacy_blind"`             // Legacy Action Space + Blind Belief
-	V01_LegacyInformed        float64 `json:"v01_legacy_informed"`          // Legacy Action Space + Informed Belief
-	V10_CompetitiveBlind      float64 `json:"v10_competitive_blind"`        // Competitive Action Space + Blind Belief
-	V11_CompetitiveInformed   float64 `json:"v11_competitive_informed"`     // Competitive Action Space + Informed Belief
-	MainEffectActionSpace     float64 `json:"main_effect_action_space"`     // 0.5 * [(V10 - V00) + (V11 - V01)]
-	MainEffectInformation     float64 `json:"main_effect_information"`      // 0.5 * [(V01 - V00) + (V11 - V10)]
-	InteractionEffect         float64 `json:"interaction_effect"`           // V11 - V10 - V01 + V00 (Complementarity)
-	TotalLift                 float64 `json:"total_lift"`                   // V11 - V00
-	ConditionalVoIUnderComp   float64 `json:"conditional_voi_under_comp"`   // V11 - V10
-	ConditionalVoIUnderLegacy float64 `json:"conditional_voi_under_legacy"` // V01 - V00
+	V00_LegacyBlind         float64                   `json:"v00_legacy_blind"`          // Legacy Action Space + Blind Belief
+	V01_LegacyInformed      float64                   `json:"v01_legacy_informed"`       // Legacy Action Space + Informed Belief
+	V10_CompetitiveBlind    float64                   `json:"v10_competitive_blind"`     // Competitive Action Space + Blind Belief
+	V11_CompetitiveInformed float64                   `json:"v11_competitive_informed"`  // Competitive Action Space + Informed Belief
+	DeltaA_Blind            float64                   `json:"delta_a_blind"`             // V10 - V00: Competitive-policy effect under blind belief
+	DeltaA_Informed         float64                   `json:"delta_a_informed"`          // V11 - V01: Competitive-policy effect under informed belief
+	DeltaI_Legacy           float64                   `json:"delta_i_legacy"`            // V01 - V00: Information effect under legacy policy
+	DeltaI_Comp             float64                   `json:"delta_i_comp"`              // V11 - V10: Information effect under competitive policy
+	InteractionEffect       float64                   `json:"interaction_effect"`        // (V11 - V10) - (V01 - V00): Supermodular Complementarity
+	InteractionTest         pkgmath.PairedTTestResult `json:"interaction_test"`          // Paired statistical hypothesis test on D_i
+	MainEffectActionSpace   float64                   `json:"main_effect_action_space"`  // 0.5 * [DeltaA_Blind + DeltaA_Informed]
+	MainEffectInformation   float64                   `json:"main_effect_information"`   // 0.5 * [DeltaI_Legacy + DeltaI_Comp]
+	TotalLift               float64                   `json:"total_lift"`                // V11 - V00
+	TotalLiftPercent        float64                   `json:"total_lift_percent"`        // ((V11 - V00) / |V00|) * 100
 }
 
 // SummaryString formats the 2x2 factorial analysis.
 func (f FactorialDecomposition2x2) SummaryString() string {
 	return fmt.Sprintf(
-		"2x2 Factorial Economic Matrix:\n"+
-			"                   | Blind Belief (b0) | Informed Belief (bt) | Marginal VoI\n"+
-			"  -----------------+-------------------+----------------------+-------------\n"+
-			"  Legacy Action    | V00 = $%9.2f  | V01 = $%9.2f     | $%+9.2f\n"+
-			"  Competitive Act. | V10 = $%9.2f  | V11 = $%9.2f     | $%+9.2f\n"+
-			"  -----------------+-------------------+----------------------+-------------\n"+
-			"  Marginal VoA     | $%+9.2f       | $%+9.2f          | Total: $%+9.2f\n\n"+
-			"  Main Effect of Action Space (VoA):  +$%9.2f\n"+
-			"  Main Effect of Information (VoI):   +$%9.2f\n"+
-			"  Interaction Effect (Complement):   +$%9.2f",
-		f.V00_LegacyBlind, f.V01_LegacyInformed, f.ConditionalVoIUnderLegacy,
-		f.V10_CompetitiveBlind, f.V11_CompetitiveInformed, f.ConditionalVoIUnderComp,
-		f.V10_CompetitiveBlind-f.V00_LegacyBlind, f.V11_CompetitiveInformed-f.V01_LegacyInformed, f.TotalLift,
+		"2x2 Empirical Economic Matrix:\n"+
+			"                   | Blind Belief (b0) | Informed Belief (bt) | Marginal Info Effect\n"+
+			"  -----------------+-------------------+----------------------+----------------------\n"+
+			"  Legacy Action    | V00 = $%9.2f  | V01 = $%9.2f     | Δ_I|legacy = $%+9.2f\n"+
+			"  Competitive Act. | V10 = $%9.2f  | V11 = $%9.2f     | Δ_I|comp   = $%+9.2f\n"+
+			"  -----------------+-------------------+----------------------+----------------------\n"+
+			"  Marginal Action  | Δ_A|blind         | Δ_A|informed         | Total Lift (V11-V00)\n"+
+			"  Effect           | $%+9.2f       | $%+9.2f          | Total: $%+9.2f (+%.2f%%)\n\n"+
+			"  Main Effect of Action Space:       +$%9.2f\n"+
+			"  Main Effect of Information:        +$%9.2f\n"+
+			"  Supermodular Interaction (Δ_int):  +$%9.2f",
+		f.V00_LegacyBlind, f.V01_LegacyInformed, f.DeltaI_Legacy,
+		f.V10_CompetitiveBlind, f.V11_CompetitiveInformed, f.DeltaI_Comp,
+		f.DeltaA_Blind, f.DeltaA_Informed, f.TotalLift, f.TotalLiftPercent,
 		f.MainEffectActionSpace, f.MainEffectInformation, f.InteractionEffect,
 	)
 }
@@ -128,9 +135,44 @@ type FactorialReport2x2 struct {
 	Factorial            FactorialDecomposition2x2 `json:"factorial"`
 	TTestV11VsV00        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v00"`
 	TTestV11VsV10        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v10"`
+	TTestV11VsV01        pkgmath.PairedTTestResult `json:"t_test_v11_vs_v01"`
 	TTestV10VsV00        pkgmath.PairedTTestResult `json:"t_test_v10_vs_v00"`
 	TTestV01VsV00        pkgmath.PairedTTestResult `json:"t_test_v01_vs_v00"`
+	TTestInteraction     pkgmath.PairedTTestResult `json:"t_test_interaction"`
 	ExecutionDurationSec float64                   `json:"execution_duration_sec"`
+}
+
+// SummaryString formats the full statistical scorecard for the 2x2 factorial experiment.
+func (r FactorialReport2x2) SummaryString() string {
+	f := r.Factorial
+	tInt := r.TTestInteraction
+	out := "================================================================================\n" +
+		"          PROJECT MITTENS: 2x2 FACTORIAL VALUE OF INFORMATION & PRICING         \n" +
+		"================================================================================\n" +
+		f.SummaryString() + "\n" +
+		"--------------------------------------------------------------------------------\n" +
+		fmt.Sprintf(" Statistical Contrasts & Hypothesis Tests (N = %d paired episodes):\n", r.TTestV11VsV00.N) +
+		fmt.Sprintf("  • Δ_I|legacy (V01-V00): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Info under legacy)\n",
+			r.TTestV01VsV00.MeanDifference, r.TTestV01VsV00.ConfidenceLow95, r.TTestV01VsV00.ConfidenceHigh95, r.TTestV01VsV00.TStatistic, r.TTestV01VsV00.PValueTwoTailed) +
+		fmt.Sprintf("  • Δ_A|blind  (V10-V00): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Blind competitive hurts)\n",
+			r.TTestV10VsV00.MeanDifference, r.TTestV10VsV00.ConfidenceLow95, r.TTestV10VsV00.ConfidenceHigh95, r.TTestV10VsV00.TStatistic, r.TTestV10VsV00.PValueTwoTailed) +
+		fmt.Sprintf("  • Δ_I|comp   (V11-V10): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Info under competitive)\n",
+			r.TTestV11VsV10.MeanDifference, r.TTestV11VsV10.ConfidenceLow95, r.TTestV11VsV10.ConfidenceHigh95, r.TTestV11VsV10.TStatistic, r.TTestV11VsV10.PValueTwoTailed) +
+		fmt.Sprintf("  • Δ_A|inf    (V11-V01): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Full vs informed legacy)\n",
+			r.TTestV11VsV01.MeanDifference, r.TTestV11VsV01.ConfidenceLow95, r.TTestV11VsV01.ConfidenceHigh95, r.TTestV11VsV01.TStatistic, r.TTestV11VsV01.PValueTwoTailed) +
+		fmt.Sprintf("  • Full Lift  (V11-V00): Mean = $%+8.2f | 95%% CI: [$%+8.2f, $%+8.2f] | t = %+6.2f | p = %-9.3e | (Total Mittens advantage: %+5.2f%%)\n",
+			r.TTestV11VsV00.MeanDifference, r.TTestV11VsV00.ConfidenceLow95, r.TTestV11VsV00.ConfidenceHigh95, r.TTestV11VsV00.TStatistic, r.TTestV11VsV00.PValueTwoTailed, r.TTestV11VsV00.PercentLift) +
+		"--------------------------------------------------------------------------------\n" +
+		" Supermodular Interaction Analysis (Complementarity Δ_int = D_i):\n" +
+		fmt.Sprintf("  • Mean Interaction Δ_int:  +$%.2f (SD = $%.2f, SE = $%.2f)\n", tInt.MeanDifference, tInt.StdDevDifference, tInt.StdErrDifference) +
+		fmt.Sprintf("  • 95%% Paired Confidence:   [$+%.2f, $+%.2f]\n", tInt.ConfidenceLow95, tInt.ConfidenceHigh95) +
+		fmt.Sprintf("  • Hypothesis Test:         t = %+6.2f, df = %.0f, p(two-tailed) = %e, Cohen's d_z = %.4f\n", tInt.TStatistic, tInt.DegreesOfFreedom, tInt.PValueTwoTailed, tInt.CohensD) +
+		fmt.Sprintf("  • Episode Attribution:     Positive: %d (%.1f%%) | Negative: %d (%.1f%%) | Exact Tie: %d (%.1f%%)\n",
+			tInt.WinsCandidate, float64(tInt.WinsCandidate)/float64(tInt.N)*100.0,
+			tInt.WinsBaseline, float64(tInt.WinsBaseline)/float64(tInt.N)*100.0,
+			tInt.Ties, float64(tInt.Ties)/float64(tInt.N)*100.0) +
+		"================================================================================\n"
+	return out
 }
 
 // TripartiteReport encapsulates the findings of a 3-way head-to-head tournament.
@@ -1014,44 +1056,96 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	v10 := make([]float64, cfg.Episodes)
 	v11 := make([]float64, cfg.Episodes)
 
-	for ep := 0; ep < cfg.Episodes; ep++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		renderProgress(ep, cfg.Episodes, fmt.Sprintf("Episode %d/%d (Factorial 2x2)...", ep+1, cfg.Episodes), startTime)
-		epSeed := cfg.BaseSeed + uint64(ep)*7919
-
-		// 1. Run V00 (Legacy Action + Blind)
-		s00, err := r.runEpisodeN0(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V00 failed: %w", ep, err)
-		}
-		// 2. Run V01 (Legacy Action + Informed)
-		s01, err := r.runEpisodeN0Informed(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V01 failed: %w", ep, err)
-		}
-		// 3. Run V10 (Competitive Action + Blind)
-		s10, err := r.runEpisodeN1Blind(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V10 failed: %w", ep, err)
-		}
-		// 4. Run V11 (Competitive Action + Informed)
-		s11, err := r.runEpisodeN1(ctx, epSeed)
-		if err != nil {
-			return nil, fmt.Errorf("factorial: episode %d V11 failed: %w", ep, err)
-		}
-
-		v00[ep] = s00.NetContribution
-		v01[ep] = s01.NetContribution
-		v10[ep] = s10.NetContribution
-		v11[ep] = s11.NetContribution
-
-		renderProgress(ep+1, cfg.Episodes, fmt.Sprintf("Episode %d/%d complete", ep+1, cfg.Episodes), startTime)
+	type epResult struct {
+		ep  int
+		v00 float64
+		v01 float64
+		v10 float64
+		v11 float64
+		err error
 	}
+
+	numWorkers := runtime.GOMAXPROCS(0)
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+	if numWorkers > cfg.Episodes {
+		numWorkers = cfg.Episodes
+	}
+
+	jobs := make(chan int, cfg.Episodes)
+	results := make(chan epResult, cfg.Episodes)
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ep := range jobs {
+				select {
+				case <-ctx.Done():
+					results <- epResult{ep: ep, err: ctx.Err()}
+					return
+				default:
+				}
+
+				epSeed := cfg.BaseSeed + uint64(ep)*7919
+
+				// 1. Run V00 (Legacy Action + Blind)
+				s00, err := r.runEpisodeN0(ctx, epSeed)
+				if err != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial ep %d V00: %w", ep, err)}
+					return
+				}
+				// 2. Run V01 (Legacy Action + Informed)
+				s01, err := r.runEpisodeN0Informed(ctx, epSeed)
+				if err != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial ep %d V01: %w", ep, err)}
+					return
+				}
+				// 3. Run V10 (Competitive Action + Blind)
+				s10, err := r.runEpisodeN1Blind(ctx, epSeed)
+				if err != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial ep %d V10: %w", ep, err)}
+					return
+				}
+				// 4. Run V11 (Competitive Action + Informed)
+				s11, err := r.runEpisodeN1(ctx, epSeed)
+				if err != nil {
+					results <- epResult{ep: ep, err: fmt.Errorf("factorial ep %d V11: %w", ep, err)}
+					return
+				}
+
+				results <- epResult{
+					ep:  ep,
+					v00: s00.NetContribution,
+					v01: s01.NetContribution,
+					v10: s10.NetContribution,
+					v11: s11.NetContribution,
+				}
+			}
+		}()
+	}
+
+	for ep := 0; ep < cfg.Episodes; ep++ {
+		jobs <- ep
+	}
+	close(jobs)
+
+	completed := 0
+	for i := 0; i < cfg.Episodes; i++ {
+		res := <-results
+		if res.err != nil {
+			return nil, res.err
+		}
+		v00[res.ep] = res.v00
+		v01[res.ep] = res.v01
+		v10[res.ep] = res.v10
+		v11[res.ep] = res.v11
+		completed++
+		renderProgress(completed, cfg.Episodes, fmt.Sprintf("Episodes completed: %d/%d (Workers: %d)", completed, cfg.Episodes, numWorkers), startTime)
+	}
+	wg.Wait()
 
 	tV11VsV00, err := pkgmath.ComputePairedTTest(v00, v11)
 	if err != nil {
@@ -1061,6 +1155,10 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v11 vs v10 failed: %w", err)
 	}
+	tV11VsV01, err := pkgmath.ComputePairedTTest(v01, v11)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test v11 vs v01 failed: %w", err)
+	}
 	tV10VsV00, err := pkgmath.ComputePairedTTest(v00, v10)
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v10 vs v00 failed: %w", err)
@@ -1068,6 +1166,18 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	tV01VsV00, err := pkgmath.ComputePairedTTest(v00, v01)
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v01 vs v00 failed: %w", err)
+	}
+
+	// Calculate paired episode-level interaction difference D_i = (V11_i - V10_i) - (V01_i - V00_i)
+	dLegacy := make([]float64, cfg.Episodes)
+	dComp := make([]float64, cfg.Episodes)
+	for i := 0; i < cfg.Episodes; i++ {
+		dLegacy[i] = v01[i] - v00[i]
+		dComp[i] = v11[i] - v10[i]
+	}
+	tInteraction, err := pkgmath.ComputePairedTTest(dLegacy, dComp)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test interaction failed: %w", err)
 	}
 
 	mean00 := tV11VsV00.MeanBaseline
@@ -1079,17 +1189,27 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	mainInfo := 0.5 * ((mean01 - mean00) + (mean11 - mean10))
 	interaction := mean11 - mean10 - mean01 + mean00
 
+	totLift := mean11 - mean00
+	totLiftPct := 0.0
+	if math.Abs(mean00) > 1e-6 {
+		totLiftPct = (totLift / math.Abs(mean00)) * 100.0
+	}
+
 	factorial := FactorialDecomposition2x2{
-		V00_LegacyBlind:           mean00,
-		V01_LegacyInformed:        mean01,
-		V10_CompetitiveBlind:      mean10,
-		V11_CompetitiveInformed:   mean11,
-		MainEffectActionSpace:     mainAction,
-		MainEffectInformation:     mainInfo,
-		InteractionEffect:         interaction,
-		TotalLift:                 mean11 - mean00,
-		ConditionalVoIUnderComp:   mean11 - mean10,
-		ConditionalVoIUnderLegacy: mean01 - mean00,
+		V00_LegacyBlind:         mean00,
+		V01_LegacyInformed:      mean01,
+		V10_CompetitiveBlind:    mean10,
+		V11_CompetitiveInformed: mean11,
+		DeltaA_Blind:            mean10 - mean00,
+		DeltaA_Informed:         mean11 - mean01,
+		DeltaI_Legacy:           mean01 - mean00,
+		DeltaI_Comp:             mean11 - mean10,
+		InteractionEffect:       interaction,
+		InteractionTest:         tInteraction,
+		MainEffectActionSpace:   mainAction,
+		MainEffectInformation:   mainInfo,
+		TotalLift:               totLift,
+		TotalLiftPercent:        totLiftPct,
 	}
 
 	return &FactorialReport2x2{
@@ -1097,8 +1217,10 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 		Factorial:            factorial,
 		TTestV11VsV00:        tV11VsV00,
 		TTestV11VsV10:        tV11VsV10,
+		TTestV11VsV01:        tV11VsV01,
 		TTestV10VsV00:        tV10VsV00,
 		TTestV01VsV00:        tV01VsV00,
+		TTestInteraction:     tInteraction,
 		ExecutionDurationSec: time.Since(startTime).Seconds(),
 	}, nil
 }

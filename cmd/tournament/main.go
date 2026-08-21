@@ -141,7 +141,6 @@ func main() {
 		}
 		fmt.Print("\n" + curves.SummaryString())
 		exportData = curves
-
 	default: // pairwise N0 vs N1
 		report, err := runner.Run(ctx)
 		if err != nil {

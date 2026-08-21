@@ -92,34 +92,41 @@ func (d TripartiteDecomposition) SummaryString() string {
 
 // FactorialDecomposition2x2 encapsulates the full 2x2 factorial experimental evaluation.
 type FactorialDecomposition2x2 struct {
-	V00_LegacyBlind           float64 `json:"v00_legacy_blind"`             // Legacy Action Space + Blind Belief
-	V01_LegacyInformed        float64 `json:"v01_legacy_informed"`          // Legacy Action Space + Informed Belief
-	V10_CompetitiveBlind      float64 `json:"v10_competitive_blind"`        // Competitive Action Space + Blind Belief
-	V11_CompetitiveInformed   float64 `json:"v11_competitive_informed"`     // Competitive Action Space + Informed Belief
-	MainEffectActionSpace     float64 `json:"main_effect_action_space"`     // 0.5 * [(V10 - V00) + (V11 - V01)]
-	MainEffectInformation     float64 `json:"main_effect_information"`      // 0.5 * [(V01 - V00) + (V11 - V10)]
-	InteractionEffect         float64 `json:"interaction_effect"`           // V11 - V10 - V01 + V00 (Complementarity)
-	TotalLift                 float64 `json:"total_lift"`                   // V11 - V00
-	ConditionalVoIUnderComp   float64 `json:"conditional_voi_under_comp"`   // V11 - V10
-	ConditionalVoIUnderLegacy float64 `json:"conditional_voi_under_legacy"` // V01 - V00
+	V00_LegacyBlind           float64                   `json:"v00_legacy_blind"`          // Legacy Action Space + Blind Belief
+	V01_LegacyInformed        float64                   `json:"v01_legacy_informed"`       // Legacy Action Space + Informed Belief
+	V10_CompetitiveBlind      float64                   `json:"v10_competitive_blind"`     // Competitive Action Space + Blind Belief
+	V11_CompetitiveInformed   float64                   `json:"v11_competitive_informed"`  // Competitive Action Space + Informed Belief
+	DeltaA_Blind              float64                   `json:"delta_a_blind"`             // V10 - V00: Competitive-policy effect under blind belief
+	DeltaA_Informed           float64                   `json:"delta_a_informed"`          // V11 - V01: Competitive-policy effect under informed belief
+	DeltaI_Legacy             float64                   `json:"delta_i_legacy"`            // V01 - V00: Information effect under legacy policy
+	DeltaI_Comp               float64                   `json:"delta_i_comp"`              // V11 - V10: Information effect under competitive policy
+	ConditionalVoIUnderLegacy float64                   `json:"conditional_voi_under_legacy"`
+	ConditionalVoIUnderComp   float64                   `json:"conditional_voi_under_comp"`
+	InteractionEffect         float64                   `json:"interaction_effect"`        // (V11 - V10) - (V01 - V00): Supermodular Complementarity
+	InteractionTest           pkgmath.PairedTTestResult `json:"interaction_test"`          // Paired statistical hypothesis test on D_i
+	MainEffectActionSpace     float64                   `json:"main_effect_action_space"`  // 0.5 * [DeltaA_Blind + DeltaA_Informed]
+	MainEffectInformation     float64                   `json:"main_effect_information"`   // 0.5 * [DeltaI_Legacy + DeltaI_Comp]
+	TotalLift                 float64                   `json:"total_lift"`                // V11 - V00
+	TotalLiftPercent          float64                   `json:"total_lift_percent"`        // ((V11 - V00) / |V00|) * 100
 }
 
 // SummaryString formats the 2x2 factorial analysis.
 func (f FactorialDecomposition2x2) SummaryString() string {
 	return fmt.Sprintf(
-		"2x2 Factorial Economic Matrix:\n"+
-			"                   | Blind Belief (b0) | Informed Belief (bt) | Marginal VoI\n"+
-			"  -----------------+-------------------+----------------------+-------------\n"+
-			"  Legacy Action    | V00 = $%9.2f  | V01 = $%9.2f     | $%+9.2f\n"+
-			"  Competitive Act. | V10 = $%9.2f  | V11 = $%9.2f     | $%+9.2f\n"+
-			"  -----------------+-------------------+----------------------+-------------\n"+
-			"  Marginal VoA     | $%+9.2f       | $%+9.2f          | Total: $%+9.2f\n\n"+
-			"  Main Effect of Action Space (VoA):  +$%9.2f\n"+
-			"  Main Effect of Information (VoI):   +$%9.2f\n"+
-			"  Interaction Effect (Complement):   +$%9.2f",
-		f.V00_LegacyBlind, f.V01_LegacyInformed, f.ConditionalVoIUnderLegacy,
-		f.V10_CompetitiveBlind, f.V11_CompetitiveInformed, f.ConditionalVoIUnderComp,
-		f.V10_CompetitiveBlind-f.V00_LegacyBlind, f.V11_CompetitiveInformed-f.V01_LegacyInformed, f.TotalLift,
+		"2x2 Empirical Economic Matrix:\n"+
+			"                   | Blind Belief (b0) | Informed Belief (bt) | Marginal Info Effect\n"+
+			"  -----------------+-------------------+----------------------+----------------------\n"+
+			"  Legacy Action    | V00 = $%9.2f  | V01 = $%9.2f     | Δ_I|legacy = $%+9.2f\n"+
+			"  Competitive Act. | V10 = $%9.2f  | V11 = $%9.2f     | Δ_I|comp   = $%+9.2f\n"+
+			"  -----------------+-------------------+----------------------+----------------------\n"+
+			"  Marginal Action  | Δ_A|blind         | Δ_A|informed         | Total Lift (V11-V00)\n"+
+			"  Effect           | $%+9.2f       | $%+9.2f          | Total: $%+9.2f (+%.2f%%)\n\n"+
+			"  Main Effect of Action Space:       +$%9.2f\n"+
+			"  Main Effect of Information:        +$%9.2f\n"+
+			"  Supermodular Interaction (Δ_int):  +$%9.2f",
+		f.V00_LegacyBlind, f.V01_LegacyInformed, f.DeltaI_Legacy,
+		f.V10_CompetitiveBlind, f.V11_CompetitiveInformed, f.DeltaI_Comp,
+		f.DeltaA_Blind, f.DeltaA_Informed, f.TotalLift, f.TotalLiftPercent,
 		f.MainEffectActionSpace, f.MainEffectInformation, f.InteractionEffect,
 	)
 }
@@ -1176,6 +1183,10 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v11 vs v10 failed: %w", err)
 	}
+	tV11VsV01, err := pkgmath.ComputePairedTTest(v01, v11)
+	if err != nil {
+		return nil, fmt.Errorf("factorial: t-test v11 vs v01 failed: %w", err)
+	}
 	tV10VsV00, err := pkgmath.ComputePairedTTest(v00, v10)
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v10 vs v00 failed: %w", err)
@@ -1183,10 +1194,6 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	tV01VsV00, err := pkgmath.ComputePairedTTest(v00, v01)
 	if err != nil {
 		return nil, fmt.Errorf("factorial: t-test v01 vs v00 failed: %w", err)
-	}
-	tV11VsV01, err := pkgmath.ComputePairedTTest(v01, v11)
-	if err != nil {
-		return nil, fmt.Errorf("factorial: t-test v11 vs v01 failed: %w", err)
 	}
 
 	dComp := make([]float64, cfg.Episodes)
@@ -1222,17 +1229,27 @@ func (r *TournamentRunner) RunFactorial2x2(ctx context.Context) (*FactorialRepor
 	mainInfo := 0.5 * ((mean01 - mean00) + (mean11 - mean10))
 	interaction := mean11 - mean10 - mean01 + mean00
 
+	totLift := mean11 - mean00
+	totLiftPct := 0.0
+	if math.Abs(mean00) > 1e-6 {
+		totLiftPct = (totLift / math.Abs(mean00)) * 100.0
+	}
+
 	factorial := FactorialDecomposition2x2{
-		V00_LegacyBlind:           mean00,
-		V01_LegacyInformed:        mean01,
-		V10_CompetitiveBlind:      mean10,
-		V11_CompetitiveInformed:   mean11,
-		MainEffectActionSpace:     mainAction,
-		MainEffectInformation:     mainInfo,
-		InteractionEffect:         interaction,
-		TotalLift:                 mean11 - mean00,
-		ConditionalVoIUnderComp:   mean11 - mean10,
-		ConditionalVoIUnderLegacy: mean01 - mean00,
+		V00_LegacyBlind:         mean00,
+		V01_LegacyInformed:      mean01,
+		V10_CompetitiveBlind:    mean10,
+		V11_CompetitiveInformed: mean11,
+		DeltaA_Blind:            mean10 - mean00,
+		DeltaA_Informed:         mean11 - mean01,
+		DeltaI_Legacy:           mean01 - mean00,
+		DeltaI_Comp:             mean11 - mean10,
+		InteractionEffect:       interaction,
+		InteractionTest:         tInteraction,
+		MainEffectActionSpace:   mainAction,
+		MainEffectInformation:   mainInfo,
+		TotalLift:               totLift,
+		TotalLiftPercent:        totLiftPct,
 	}
 
 	return &FactorialReport2x2{
@@ -1425,7 +1442,6 @@ func (r *TournamentRunner) Run4Way(ctx context.Context) (*FourWayReport, error) 
 		ExecutionDurationSec: time.Since(startTime).Seconds(),
 	}, nil
 }
-
 func meanSlice(vals []float64) float64 {
 	if len(vals) == 0 {
 		return 0.0

@@ -225,9 +225,10 @@ func (r *RollingHorizonRunner[C]) Run(
 			}
 
 			updatedLearner, err := currentLearner.UpdateFromMatching(matchingSol, availableDrivers, availableLoads)
-			if err == nil {
-				currentLearner = updatedLearner
+			if err != nil {
+				return nil, currentState, fmt.Errorf("service: vfa learning update failed at epoch %d: %w", epoch, err)
 			}
+			currentLearner = updatedLearner
 		}
 
 		// 4. Synthesize Multi-Leg Tours & Relays
@@ -241,9 +242,10 @@ func (r *RollingHorizonRunner[C]) Run(
 				availableLoads,
 				cfg.MinRelayHaulMiles,
 			)
-			if err == nil {
-				dispatchBatch = batch
+			if err != nil {
+				return nil, currentState, fmt.Errorf("service: relay batch synthesis failed at epoch %d: %w", epoch, err)
 			}
+			dispatchBatch = batch
 		}
 
 		// 5. Daily metrics snapshot

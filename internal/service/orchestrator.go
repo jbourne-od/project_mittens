@@ -122,11 +122,31 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 	}
 
 	// 3. Encode Initial State & Action Hashes for Cryptographic Provenance
-	initialStateHash, _ := pkgjournal.HashState(state)
-	rBytes, _, _ := pkgjournal.EncodeCanonicalResource(state.Resource())
-	iBytes, _, _ := pkgjournal.EncodeCanonicalInformation(state.Information())
-	bBytes, _, _ := pkgjournal.EncodeCanonicalBelief(state.Belief())
-	aBytes, aHash, _ := pkgjournal.EncodeCanonicalAction(action)
+	initialStateHash, err := pkgjournal.HashState(state)
+	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to hash initial state: %w", err)
+	}
+	rBytes, _, err := pkgjournal.EncodeCanonicalResource(state.Resource())
+	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to encode canonical resource: %w", err)
+	}
+	iBytes, _, err := pkgjournal.EncodeCanonicalInformation(state.Information())
+	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to encode canonical information: %w", err)
+	}
+	bBytes, _, err := pkgjournal.EncodeCanonicalBelief(state.Belief())
+	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to encode canonical belief: %w", err)
+	}
+	aBytes, aHash, err := pkgjournal.EncodeCanonicalAction(action)
+	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to encode canonical action: %w", err)
+	}
 
 	runID := fmt.Sprintf("RUN-%s", pol.Name())
 	decisionID := GenerateDecisionID(pol.Name(), currentEpoch, s.journal.Count()+1)
@@ -186,7 +206,11 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 	}
 
 	// 8. Seal Cryptographic Journal Record & Merkle Chain Link
-	nextStateHash, _ := pkgjournal.HashState(nextState)
+	nextStateHash, err := pkgjournal.HashState(nextState)
+	if err != nil {
+		telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+		return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to hash next state: %w", err)
+	}
 	prevHash := pkgjournal.GenesisPrevHash
 	if lastRec, ok := s.cryptoStore.LastRecord(runID); ok {
 		prevHash = lastRec.RecordHash
@@ -194,9 +218,12 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 
 	paramHash := pkgjournal.ComputeSHA256([]byte(pol.Name()))
 	if len(prov.ThetaParameters) > 0 {
-		if pHash, err := pkgjournal.HashParameters(prov.ThetaParameters); err == nil {
-			paramHash = pHash
+		pHash, err := pkgjournal.HashParameters(prov.ThetaParameters)
+		if err != nil {
+			telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+			return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to hash policy parameters: %w", err)
 		}
+		paramHash = pHash
 	}
 
 	cryptoRec := pkgjournal.JournalRecord{
@@ -252,7 +279,12 @@ func (s *OptimizationService[C]) OptimizeEpoch(
 	// Also update standalone cryptoStore if distinct from journal (e.g. MemoryStore)
 	if s.cryptoStore != nil {
 		if _, isSame := s.journal.(pkgjournal.JournalStore); !isSame {
-			_ = s.cryptoStore.Append(cryptoRec)
+			if err := s.cryptoStore.Append(cryptoRec); err != nil {
+				telemetry.RecordOptimizationDuration(ctx, time.Since(startTime).Seconds(), pol.Name(), "error")
+				telemetry.RecordInvariantFailure(ctx, "CryptoStoreAppendFailure")
+				logger.ErrorContext(ctx, "failed to append to crypto store", slog.String("error", err.Error()))
+				return nil, policy.DecisionProvenance{}, nil, fmt.Errorf("service: failed to append to crypto store: %w", err)
+			}
 		}
 	}
 

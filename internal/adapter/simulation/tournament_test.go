@@ -17,7 +17,10 @@ func TestTournament_SingleEpochDiagnostic(t *testing.T) {
 	cfg.LoadsPerEpoch = 15
 	seed := cfg.BaseSeed + 3 // Episode 3 seed
 
-	env, _ := simulation.NewMarketEnvironment(cfg.Market, seed)
+	env, err := simulation.NewMarketEnvironment(cfg.Market, seed)
+	if err != nil {
+		t.Fatalf("NewMarketEnvironment failed: %v", err)
+	}
 	rng := pkgmath.NewRNG(seed + 1)
 	startEpoch := int64(1700000000)
 	stepSec := int64(12 * 3600)
@@ -25,27 +28,45 @@ func TestTournament_SingleEpochDiagnostic(t *testing.T) {
 	initialDrivers := simulation.GenerateTestDrivers(10, rng)
 	initialLoads := simulation.GenerateStochasticLoads(15, startEpoch, rng)
 	resState := model.NewResourceState(initialDrivers, initialLoads)
-	infoState, _ := model.NewInformationState(startEpoch, 2.50, 3.85, 15)
+	infoState, err := model.NewInformationState(startEpoch, 2.50, 3.85, 15)
+	if err != nil {
+		t.Fatalf("NewInformationState failed: %v", err)
+	}
 
 	marketScale := model.AggregatedMarket{LatentStates: []string{"AGGRESSIVE", "MODERATE", "PASSIVE"}}
-	initBelief, _ := model.NewBelief[model.AggregatedMarket](
+	initBelief, err := model.NewBelief[model.AggregatedMarket](
 		marketScale,
 		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
 		[]float64{1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0},
 	)
-	state, _ := model.NewState(resState, infoState, initBelief)
+	if err != nil {
+		t.Fatalf("NewBelief failed: %v", err)
+	}
+	state, err := model.NewState(resState, infoState, initBelief)
+	if err != nil {
+		t.Fatalf("NewState failed: %v", err)
+	}
 
-	tMatrix, _ := model.NewTransitionMatrix(
+	tMatrix, err := model.NewTransitionMatrix(
 		[]string{"AGGRESSIVE", "MODERATE", "PASSIVE"},
 		cfg.Market.TransitionProb,
 	)
+	if err != nil {
+		t.Fatalf("NewTransitionMatrix failed: %v", err)
+	}
 	loadsMean := float64(15)
-	obsModel, _ := model.NewMarketObservationModel(map[string]model.PostureObservationProfile{
+	obsModel, err := model.NewMarketObservationModel(map[string]model.PostureObservationProfile{
 		"AGGRESSIVE": {ExpectedWinProbability: 0.35, ExpectedSpotRateMean: 2.15, ExpectedSpotRateStdDev: 0.20, ExpectedOffersMean: loadsMean},
 		"MODERATE":   {ExpectedWinProbability: 0.65, ExpectedSpotRateMean: 2.50, ExpectedSpotRateStdDev: 0.20, ExpectedOffersMean: loadsMean},
 		"PASSIVE":    {ExpectedWinProbability: 0.85, ExpectedSpotRateMean: 2.95, ExpectedSpotRateStdDev: 0.20, ExpectedOffersMean: loadsMean},
 	})
-	beliefFilter, _ := model.NewCompetitiveBeliefFilter[model.AggregatedMarket](marketScale, tMatrix, obsModel)
+	if err != nil {
+		t.Fatalf("NewMarketObservationModel failed: %v", err)
+	}
+	beliefFilter, err := model.NewCompetitiveBeliefFilter[model.AggregatedMarket](marketScale, tMatrix, obsModel)
+	if err != nil {
+		t.Fatalf("NewCompetitiveBeliefFilter failed: %v", err)
+	}
 
 	costCfg := model.DefaultCostConfig()
 	costCfg.EmptyToHomeRate = 0.20
@@ -229,5 +250,39 @@ func TestTournament_TripartiteDecomposition(t *testing.T) {
 	}
 	if report.TTestInformedVsBlind.PValueOneTailed >= 0.05 {
 		t.Errorf("expected VoI to be statistically significant (p < 0.05), got %e", report.TTestInformedVsBlind.PValueOneTailed)
+	}
+}
+
+// TestTournament_FailClosedOnInvalidConfig validates that invalid market configurations fail closed
+// during simulation runner initialization and execution rather than silently proceeding with corrupt models.
+func TestTournament_FailClosedOnInvalidConfig(t *testing.T) {
+	// 1. Invalid transition matrix dimensions in MarketConfig
+	invalidMarketCfg := simulation.DefaultMarketConfig()
+	invalidMarketCfg.TransitionProb = [][]float64{{0.5, 0.5}} // 1x2 instead of 3x3
+	_, err := simulation.NewMarketEnvironment(invalidMarketCfg, 42)
+	if err == nil {
+		t.Error("expected NewMarketEnvironment to fail closed on invalid transition prob dimensions, got nil")
+	}
+
+	// 2. TournamentRunner with invalid market config fails closed on Run
+	badTournamentCfg := simulation.DefaultTournamentConfig()
+	badTournamentCfg.Episodes = 2
+	badTournamentCfg.Market = invalidMarketCfg
+	runner := simulation.NewTournamentRunner(badTournamentCfg)
+	_, err = runner.Run(context.Background())
+	if err == nil {
+		t.Error("expected TournamentRunner.Run to fail closed on invalid market config, got nil")
+	}
+
+	// 3. Tripartite runner with invalid market config fails closed
+	_, err = runner.RunTripartite(context.Background())
+	if err == nil {
+		t.Error("expected TournamentRunner.RunTripartite to fail closed on invalid market config, got nil")
+	}
+
+	// 4. Factorial runner with invalid market config fails closed
+	_, err = runner.RunFactorial2x2(context.Background())
+	if err == nil {
+		t.Error("expected TournamentRunner.RunFactorial2x2 to fail closed on invalid market config, got nil")
 	}
 }

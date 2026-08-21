@@ -117,15 +117,14 @@ func (reg *RuleRegistry) Evaluate(ctx context.Context, evalCtx map[string]any) (
 		// Evaluate condition expression
 		condVal, _, err := cr.ConditionProgram.Eval(evalCtx)
 		if err != nil {
-			logger.DebugContext(ctx, "rule condition evaluation failed",
-				slog.String("rule_id", cr.Rule.ID),
-				slog.String("error", err.Error()),
-			)
-			continue
+			return RuleEvaluationResult{}, fmt.Errorf("rules: condition evaluation failed for rule %s: %w", cr.Rule.ID, err)
 		}
 
 		matched, ok := condVal.Value().(bool)
-		if !ok || !matched {
+		if !ok {
+			return RuleEvaluationResult{}, fmt.Errorf("rules: condition for rule %s did not evaluate to boolean (got %T)", cr.Rule.ID, condVal.Value())
+		}
+		if !matched {
 			continue
 		}
 
@@ -134,17 +133,15 @@ func (reg *RuleRegistry) Evaluate(ctx context.Context, evalCtx map[string]any) (
 		if cr.ValueProgram != nil {
 			vVal, _, err := cr.ValueProgram.Eval(evalCtx)
 			if err != nil {
-				logger.DebugContext(ctx, "rule value evaluation failed",
-					slog.String("rule_id", cr.Rule.ID),
-					slog.String("error", err.Error()),
-				)
-				continue
+				return RuleEvaluationResult{}, fmt.Errorf("rules: value evaluation failed for rule %s: %w", cr.Rule.ID, err)
 			}
 			switch v := vVal.Value().(type) {
 			case float64:
 				numVal = v
 			case int64:
 				numVal = float64(v)
+			default:
+				return RuleEvaluationResult{}, fmt.Errorf("rules: value for rule %s evaluated to unsupported type %T", cr.Rule.ID, vVal.Value())
 			}
 		}
 

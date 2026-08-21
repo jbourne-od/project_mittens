@@ -102,25 +102,28 @@ func TestDLAPolicy_LookaheadAvoidsDeadheadTrap(t *testing.T) {
 		return nil
 	}
 
-	dlaParams := policy.DLAParameters{
-		Horizon:               1,
-		NumRollouts:           1,
-		DiscountFactor:        0.95,
-		MaxConcurrentBranches: 4,
-		StepSeconds:           10800,
-		RandomSeed:            42,
-	}
+	dlaParams := policy.DefaultDLAParameters()
+	dlaParams.Horizon = 1
+	dlaParams.NumRollouts = 1
+	dlaParams.DiscountFactor = 0.95
+	dlaParams.MaxConcurrentBranches = 4
+	dlaParams.StepSeconds = 10800
+	dlaParams.RandomSeed = 42
 
-	dla := policy.NewDLAPolicy[model.Monopolistic](
+	rm := model.NewRegionManager(1.0, nil)
+	dla, err := policy.NewDLAPolicy[model.Monopolistic](
 		dlaParams,
 		costCfg,
 		feasCfg,
 		cfa,
 		sampler,
-		nil,
+		rm,
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("NewDLAPolicy failed: %v", err)
+	}
 
 	// DLA should recognize the massive downstream value in Atlanta and pick L-GATEWAY!
 	dlaAction, dlaProv, err := dla.Evaluate(context.Background(), state)
@@ -166,17 +169,21 @@ func TestDLAPolicy_DeterministicReproducibility(t *testing.T) {
 	costCfg := model.DefaultCostConfig()
 	feasCfg := model.DefaultFeasibilityConfig()
 	cfa := policy.NewCFAPolicy[model.Monopolistic](policy.DefaultCFAParameters(), costCfg, feasCfg, nil)
+	rm := model.NewRegionManager(1.0, nil)
 
-	dla := policy.NewDLAPolicy[model.Monopolistic](
+	dla, err := policy.NewDLAPolicy[model.Monopolistic](
 		policy.DefaultDLAParameters(),
 		costCfg,
 		feasCfg,
 		cfa,
 		nil,
-		nil,
+		rm,
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("NewDLAPolicy failed: %v", err)
+	}
 
 	// Run 1
 	action1, prov1, err1 := dla.Evaluate(context.Background(), state)
@@ -215,18 +222,26 @@ func TestDLAPolicy_ContextCancellation(t *testing.T) {
 	info, _ := model.NewInformationState(1000, 1.0, 2.50, 0)
 	state, _ := model.NewState(res, info, model.NewMonopolisticBelief())
 
-	dla := policy.NewDLAPolicy[model.Monopolistic](
+	costCfg := model.DefaultCostConfig()
+	feasCfg := model.DefaultFeasibilityConfig()
+	cfa := policy.NewCFAPolicy[model.Monopolistic](policy.DefaultCFAParameters(), costCfg, feasCfg, nil)
+	rm := model.NewRegionManager(1.0, nil)
+
+	dla, err := policy.NewDLAPolicy[model.Monopolistic](
 		policy.DefaultDLAParameters(),
-		model.DefaultCostConfig(),
-		model.DefaultFeasibilityConfig(),
+		costCfg,
+		feasCfg,
+		cfa,
 		nil,
-		nil,
-		nil,
+		rm,
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("NewDLAPolicy failed: %v", err)
+	}
 
-	_, _, err := dla.Evaluate(ctx, state)
+	_, _, err = dla.Evaluate(ctx, state)
 	if err == nil {
 		t.Errorf("expected context cancellation error, got nil")
 	}
@@ -253,17 +268,21 @@ func TestDLAPolicy_ConcurrentParallelEvaluations(t *testing.T) {
 	costCfg := model.DefaultCostConfig()
 	feasCfg := model.DefaultFeasibilityConfig()
 	cfa := policy.NewCFAPolicy[model.Monopolistic](policy.DefaultCFAParameters(), costCfg, feasCfg, nil)
+	rm := model.NewRegionManager(1.0, nil)
 
-	dla := policy.NewDLAPolicy[model.Monopolistic](
+	dla, err := policy.NewDLAPolicy[model.Monopolistic](
 		policy.DefaultDLAParameters(),
 		costCfg,
 		feasCfg,
 		cfa,
 		nil,
-		nil,
+		rm,
 		nil,
 		nil,
 	)
+	if err != nil {
+		t.Fatalf("NewDLAPolicy failed: %v", err)
+	}
 
 	const goroutines = 16
 	var wg sync.WaitGroup
@@ -285,4 +304,47 @@ func TestDLAPolicy_ConcurrentParallelEvaluations(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestDLAPolicy_ConstructorValidation(t *testing.T) {
+	costCfg := model.DefaultCostConfig()
+	feasCfg := model.DefaultFeasibilityConfig()
+	cfa := policy.NewCFAPolicy[model.Monopolistic](policy.DefaultCFAParameters(), costCfg, feasCfg, nil)
+	rm := model.NewRegionManager(1.0, nil)
+
+	// Horizon < 1
+	p := policy.DefaultDLAParameters()
+	p.Horizon = 0
+	if _, err := policy.NewDLAPolicy[model.Monopolistic](p, costCfg, feasCfg, cfa, nil, rm, nil, nil); err == nil {
+		t.Errorf("expected error for Horizon < 1, got nil")
+	}
+
+	// NumRollouts < 1
+	p = policy.DefaultDLAParameters()
+	p.NumRollouts = 0
+	if _, err := policy.NewDLAPolicy[model.Monopolistic](p, costCfg, feasCfg, cfa, nil, rm, nil, nil); err == nil {
+		t.Errorf("expected error for NumRollouts < 1, got nil")
+	}
+
+	// DiscountFactor <= 0 or > 1.0
+	p = policy.DefaultDLAParameters()
+	p.DiscountFactor = 0.0
+	if _, err := policy.NewDLAPolicy[model.Monopolistic](p, costCfg, feasCfg, cfa, nil, rm, nil, nil); err == nil {
+		t.Errorf("expected error for DiscountFactor <= 0, got nil")
+	}
+	p.DiscountFactor = 1.5
+	if _, err := policy.NewDLAPolicy[model.Monopolistic](p, costCfg, feasCfg, cfa, nil, rm, nil, nil); err == nil {
+		t.Errorf("expected error for DiscountFactor > 1.0, got nil")
+	}
+
+	// basePolicy == nil
+	p = policy.DefaultDLAParameters()
+	if _, err := policy.NewDLAPolicy[model.Monopolistic](p, costCfg, feasCfg, nil, nil, rm, nil, nil); err == nil {
+		t.Errorf("expected error for basePolicy == nil, got nil")
+	}
+
+	// regionManager == nil
+	if _, err := policy.NewDLAPolicy[model.Monopolistic](p, costCfg, feasCfg, cfa, nil, nil, nil, nil); err == nil {
+		t.Errorf("expected error for regionManager == nil, got nil")
+	}
 }

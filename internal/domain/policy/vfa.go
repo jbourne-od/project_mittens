@@ -85,15 +85,15 @@ func NewVFAPolicy[C model.CompetitorScale](
 	costCfg model.CostConfig,
 	feasCfg model.FeasibilityConfig,
 	rm *model.RegionManager,
-) *VFAPolicy[C] {
+) (*VFAPolicy[C], error) {
 	if table == nil {
-		table = NewVFATable(nil)
+		return nil, fmt.Errorf("vfa: table cannot be nil")
 	}
-	if discount <= 0 || discount > 1.0 {
-		discount = 0.95
+	if discount <= 0.0 || discount > 1.0 {
+		return nil, fmt.Errorf("vfa: discount must be in (0, 1], got %f", discount)
 	}
 	if rm == nil {
-		rm = model.NewRegionManager(1.0, nil)
+		return nil, fmt.Errorf("vfa: region manager cannot be nil")
 	}
 	return &VFAPolicy[C]{
 		table:         table,
@@ -104,7 +104,7 @@ func NewVFAPolicy[C model.CompetitorScale](
 		matcher:       NewBipartiteMatcher(),
 		regionManager: rm,
 		logger:        logging.NewNop(),
-	}
+	}, nil
 }
 
 // WithLogger sets the structured logger for this policy instance.
@@ -143,6 +143,8 @@ func (p *VFAPolicy[C]) Evaluate(
 
 	logger := logging.FromContext(ctx, p.logger)
 
+	prov := NewDecisionProvenance(p.Name(), state, []float64{p.discount})
+
 	res := state.Resource()
 	drivers := res.Drivers()
 	loads := res.Loads()
@@ -152,9 +154,7 @@ func (p *VFAPolicy[C]) Evaluate(
 			slog.Int("driver_count", len(drivers)),
 			slog.Int("load_count", len(loads)),
 		)
-		return model.NewAction(nil, nil), DecisionProvenance{
-			PolicyName: p.Name(),
-		}, nil
+		return model.NewAction(nil, nil), prov, nil
 	}
 
 	logger.DebugContext(ctx, "vfa starting candidate filtering",
@@ -176,11 +176,17 @@ func (p *VFAPolicy[C]) Evaluate(
 		slog.Int("feasible_arcs", len(arcs)),
 	)
 
-	// 2. Score all candidate arcs using contribution + post-decision state value
+	// 2. Score all candidate arcs using contribution + post-decision state value (fail closed on missing entities)
 	evals := make([]CandidateEvaluation, len(arcs))
 	for i, arc := range arcs {
-		driver, _ := res.GetDriver(arc.DriverID)
-		load, _ := res.GetLoad(arc.LoadID)
+		driver, okD := res.GetDriver(arc.DriverID)
+		if !okD {
+			return nil, DecisionProvenance{}, fmt.Errorf("vfa: driver %s not found in resource state", arc.DriverID)
+		}
+		load, okL := res.GetLoad(arc.LoadID)
+		if !okL {
+			return nil, DecisionProvenance{}, fmt.Errorf("vfa: load %s not found in resource state", arc.LoadID)
+		}
 
 		costBreakdown := CalculateTripCost(driver, load, arc, p.costCfg)
 		destRegion := p.regionManager.GetRegionID(load.Destination)
@@ -220,14 +226,11 @@ func (p *VFAPolicy[C]) Evaluate(
 	// 4. Construct Action and DecisionProvenance
 	action := model.NewAction(matches, nil)
 
-	provenance := DecisionProvenance{
-		PolicyName:           p.Name(),
-		BatchEpoch:           epoch,
-		EvaluatedArcs:        sortedEvals,
-		MatchedCount:         len(matches),
-		TotalNetContribution: totalNetContrib,
-		TotalObjectiveValue:  totalObj,
-	}
+	prov.BatchEpoch = epoch
+	prov.EvaluatedArcs = sortedEvals
+	prov.MatchedCount = len(matches)
+	prov.TotalNetContribution = totalNetContrib
+	prov.TotalObjectiveValue = totalObj
 
-	return action, provenance, nil
+	return action, prov, nil
 }

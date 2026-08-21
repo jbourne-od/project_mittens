@@ -128,6 +128,8 @@ func (p *CFAPolicy[C]) Evaluate(
 
 	logger := logging.FromContext(ctx, p.logger)
 
+	prov := NewDecisionProvenance(p.Name(), state, p.params.ToSlice())
+
 	res := state.Resource()
 	drivers := res.Drivers()
 	loads := res.Loads()
@@ -142,10 +144,7 @@ func (p *CFAPolicy[C]) Evaluate(
 			slog.Int("driver_count", len(drivers)),
 			slog.Int("load_count", len(loads)),
 		)
-		return model.NewAction(nil, nil), DecisionProvenance{
-			PolicyName:      p.Name(),
-			ThetaParameters: p.params.ToSlice(),
-		}, nil
+		return model.NewAction(nil, nil), prov, nil
 	}
 
 	logger.DebugContext(ctx, "cfa starting candidate filtering",
@@ -167,12 +166,20 @@ func (p *CFAPolicy[C]) Evaluate(
 		slog.Int("feasible_arcs", len(arcs)),
 	)
 
-	// 2. Score all candidate arcs under parametric cost function
+	// 2. Score all candidate arcs under parametric cost function (fail closed on missing entities)
 	_, scoreSpan := telemetry.StartSpan(ctx, "Policy.CFA.ScoreCandidateArcs")
 	evals := make([]CandidateEvaluation, len(arcs))
 	for i, arc := range arcs {
-		driver, _ := res.GetDriver(arc.DriverID)
-		load, _ := res.GetLoad(arc.LoadID)
+		driver, okD := res.GetDriver(arc.DriverID)
+		if !okD {
+			scoreSpan.End()
+			return nil, DecisionProvenance{}, fmt.Errorf("cfa: driver %s not found in resource state", arc.DriverID)
+		}
+		load, okL := res.GetLoad(arc.LoadID)
+		if !okL {
+			scoreSpan.End()
+			return nil, DecisionProvenance{}, fmt.Errorf("cfa: load %s not found in resource state", arc.LoadID)
+		}
 
 		costBreakdown := CalculateTripCost(driver, load, arc, p.costCfg)
 
@@ -224,15 +231,11 @@ func (p *CFAPolicy[C]) Evaluate(
 	// 4. Construct Action and DecisionProvenance
 	action := model.NewAction(matches, nil)
 
-	provenance := DecisionProvenance{
-		PolicyName:           p.Name(),
-		BatchEpoch:           epoch,
-		ThetaParameters:      p.params.ToSlice(),
-		EvaluatedArcs:        sortedEvals,
-		MatchedCount:         len(matches),
-		TotalNetContribution: totalNetContrib,
-		TotalObjectiveValue:  totalObj,
-	}
+	prov.BatchEpoch = epoch
+	prov.EvaluatedArcs = sortedEvals
+	prov.MatchedCount = len(matches)
+	prov.TotalNetContribution = totalNetContrib
+	prov.TotalObjectiveValue = totalObj
 
-	return action, provenance, nil
+	return action, prov, nil
 }

@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
 	"github.com/optimaldynamics/project-mittens/internal/domain/policy"
 	"github.com/optimaldynamics/project-mittens/internal/service"
+	pkgjournal "github.com/optimaldynamics/project-mittens/pkg/journal"
 )
 
 func TestStatisticCalculator_AccumulationAndKPIs(t *testing.T) {
@@ -496,6 +498,39 @@ func TestOptimizationService_CompetitiveBeliefUpdating(t *testing.T) {
 
 	if pTight <= 0.5 {
 		t.Errorf("expected belief on TightCapacity to increase > 0.5, got %f", pTight)
+	}
+}
+
+type failingCryptoStore struct {
+	*pkgjournal.MemoryStore
+}
+
+func (f *failingCryptoStore) Append(record pkgjournal.JournalRecord) error {
+	return errors.New("simulated crypto store append disk I/O failure")
+}
+
+func TestOptimizationService_CryptoStoreAppendFailure(t *testing.T) {
+	locChi := model.Location{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
+	driver := model.Driver{ID: "D-01", CurrentLocation: locChi, AvailableEpoch: 1000}
+	load := model.Load{ID: "L-01", Origin: locChi, Destination: locChi, Revenue: 500, PickupEarliestEpoch: 1000, PickupLatestEpoch: 2000, DeliveryLatestEpoch: 3000}
+
+	res := model.NewResourceState([]model.Driver{driver}, []model.Load{load})
+	info, _ := model.NewInformationState(1000, 1.0, 2.50, 0)
+	state, _ := model.NewState(res, info, model.NewMonopolisticBelief())
+
+	cfa := policy.NewCFAPolicy[model.Monopolistic](
+		policy.DefaultCFAParameters(),
+		model.DefaultCostConfig(),
+		model.DefaultFeasibilityConfig(),
+		nil,
+	)
+
+	svc := service.NewOptimizationService[model.Monopolistic](service.NewMemoryJournal(), nil)
+	svc = svc.WithCryptoStore(&failingCryptoStore{MemoryStore: pkgjournal.NewMemoryStore()})
+
+	_, _, _, err := svc.OptimizeEpoch(context.Background(), state, cfa, 2000, nil)
+	if err == nil {
+		t.Fatalf("expected OptimizeEpoch to fail closed when cryptoStore.Append fails, got nil")
 	}
 }
 

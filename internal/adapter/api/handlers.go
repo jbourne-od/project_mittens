@@ -315,17 +315,24 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		rm := model.NewRegionManager(1.0, nil)
 		var compPol policy.Policy[model.AggregatedMarket]
 		switch strings.ToUpper(strings.TrimSpace(req.PolicyClass)) {
 		case "PIECEWISEVFA", "VFA":
-			compPol = policy.NewPiecewiseVFAPolicy[model.AggregatedMarket](
-				nil,
+			pvfaTable := policy.NewPiecewiseLinearVFATable(nil)
+			var polErr error
+			compPol, polErr = policy.NewPiecewiseVFAPolicy[model.AggregatedMarket](
+				pvfaTable,
 				nil,
 				0.95,
 				costCfg,
 				feasCfg,
-				nil,
+				rm,
 			)
+			if polErr != nil {
+				h.writeError(w, http.StatusInternalServerError, "POLICY_INIT_FAILED", polErr.Error())
+				return
+			}
 		case "DLA":
 			cfaBase := policy.NewCFAPolicy[model.AggregatedMarket](
 				policy.DefaultCFAParameters(),
@@ -333,16 +340,21 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 				feasCfg,
 				nil,
 			)
-			compPol = policy.NewDLAPolicy[model.AggregatedMarket](
+			var polErr error
+			compPol, polErr = policy.NewDLAPolicy[model.AggregatedMarket](
 				policy.DefaultDLAParameters(),
 				costCfg,
 				feasCfg,
 				cfaBase,
 				nil,
-				nil,
+				rm,
 				nil,
 				nil,
 			)
+			if polErr != nil {
+				h.writeError(w, http.StatusInternalServerError, "POLICY_INIT_FAILED", polErr.Error())
+				return
+			}
 		default:
 			compPol = policy.NewCFAPolicy[model.AggregatedMarket](
 				policy.DefaultCFAParameters(),
@@ -366,17 +378,24 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		rm := model.NewRegionManager(1.0, nil)
 		var pol policy.Policy[model.Monopolistic]
 		switch strings.ToUpper(strings.TrimSpace(req.PolicyClass)) {
 		case "PIECEWISEVFA", "VFA":
-			pol = policy.NewPiecewiseVFAPolicy[model.Monopolistic](
-				nil,
+			pvfaTable := policy.NewPiecewiseLinearVFATable(nil)
+			var polErr error
+			pol, polErr = policy.NewPiecewiseVFAPolicy[model.Monopolistic](
+				pvfaTable,
 				nil,
 				0.95,
 				costCfg,
 				feasCfg,
-				nil,
+				rm,
 			)
+			if polErr != nil {
+				h.writeError(w, http.StatusInternalServerError, "POLICY_INIT_FAILED", polErr.Error())
+				return
+			}
 		case "DLA":
 			cfaBase := policy.NewCFAPolicy[model.Monopolistic](
 				policy.DefaultCFAParameters(),
@@ -384,16 +403,21 @@ func (h *Handler) HandleOptimize(w http.ResponseWriter, r *http.Request) {
 				feasCfg,
 				nil,
 			)
-			pol = policy.NewDLAPolicy[model.Monopolistic](
+			var polErr error
+			pol, polErr = policy.NewDLAPolicy[model.Monopolistic](
 				policy.DefaultDLAParameters(),
 				costCfg,
 				feasCfg,
 				cfaBase,
 				nil,
-				nil,
+				rm,
 				nil,
 				nil,
 			)
+			if polErr != nil {
+				h.writeError(w, http.StatusInternalServerError, "POLICY_INIT_FAILED", polErr.Error())
+				return
+			}
 		default:
 			pol = policy.NewCFAPolicy[model.Monopolistic](
 				policy.DefaultCFAParameters(),

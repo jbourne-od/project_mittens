@@ -254,15 +254,15 @@ func NewPiecewiseVFAPolicy[C model.CompetitorScale](
 	costCfg model.CostConfig,
 	feasCfg model.FeasibilityConfig,
 	rm *model.RegionManager,
-) *PiecewiseVFAPolicy[C] {
+) (*PiecewiseVFAPolicy[C], error) {
 	if table == nil {
-		table = NewPiecewiseLinearVFATable(nil)
+		return nil, fmt.Errorf("vfa_piecewise: table cannot be nil")
 	}
-	if discount <= 0 || discount > 1.0 {
-		discount = 0.95
+	if discount <= 0.0 || discount > 1.0 {
+		return nil, fmt.Errorf("vfa_piecewise: discount must be in (0, 1], got %f", discount)
 	}
 	if rm == nil {
-		rm = model.NewRegionManager(1.0, nil)
+		return nil, fmt.Errorf("vfa_piecewise: region manager cannot be nil")
 	}
 	return &PiecewiseVFAPolicy[C]{
 		table:         table,
@@ -274,7 +274,7 @@ func NewPiecewiseVFAPolicy[C model.CompetitorScale](
 		matcher:       NewBipartiteMatcher(),
 		regionManager: rm,
 		logger:        logging.NewNop(),
-	}
+	}, nil
 }
 
 // WithLogger sets the structured logger for this policy instance.
@@ -316,6 +316,8 @@ func (p *PiecewiseVFAPolicy[C]) Evaluate(
 
 	logger := logging.FromContext(ctx, p.logger)
 
+	prov := NewDecisionProvenance(p.Name(), state, []float64{p.discount})
+
 	res := state.Resource()
 	drivers := res.Drivers()
 	loads := res.Loads()
@@ -330,9 +332,7 @@ func (p *PiecewiseVFAPolicy[C]) Evaluate(
 			slog.Int("driver_count", len(drivers)),
 			slog.Int("load_count", len(loads)),
 		)
-		return model.NewAction(nil, nil), DecisionProvenance{
-			PolicyName: p.Name(),
-		}, nil
+		return model.NewAction(nil, nil), prov, nil
 	}
 
 	// 1. Generate feasible candidate arcs concurrently
@@ -352,12 +352,20 @@ func (p *PiecewiseVFAPolicy[C]) Evaluate(
 		regionDriverCounts[destRegion]++
 	}
 
-	// 2. Score candidate arcs with immediate contribution + gamma * marginal VFA slope
+	// 2. Score candidate arcs with immediate contribution + gamma * marginal VFA slope (fail closed on missing entities)
 	_, scoreSpan := telemetry.StartSpan(ctx, "Policy.PiecewiseVFA.ScoreCandidateArcs")
 	evals := make([]CandidateEvaluation, len(arcs))
 	for i, arc := range arcs {
-		driver, _ := res.GetDriver(arc.DriverID)
-		load, _ := res.GetLoad(arc.LoadID)
+		driver, okD := res.GetDriver(arc.DriverID)
+		if !okD {
+			scoreSpan.End()
+			return nil, DecisionProvenance{}, fmt.Errorf("vfa_piecewise: driver %s not found in resource state", arc.DriverID)
+		}
+		load, okL := res.GetLoad(arc.LoadID)
+		if !okL {
+			scoreSpan.End()
+			return nil, DecisionProvenance{}, fmt.Errorf("vfa_piecewise: load %s not found in resource state", arc.LoadID)
+		}
 
 		costBreakdown := CalculateTripCost(driver, load, arc, p.costCfg)
 		destRegion := p.regionManager.GetRegionID(load.Destination)
@@ -399,14 +407,12 @@ func (p *PiecewiseVFAPolicy[C]) Evaluate(
 
 	// 4. Construct Action and DecisionProvenance
 	action := model.NewAction(sol.Matches, nil)
-	provenance := DecisionProvenance{
-		PolicyName:           p.Name(),
-		BatchEpoch:           epoch,
-		EvaluatedArcs:        sol.Evaluations,
-		MatchedCount:         len(sol.Matches),
-		TotalNetContribution: sol.TotalNetContribution,
-		TotalObjectiveValue:  sol.TotalObjective,
-	}
 
-	return action, provenance, nil
+	prov.BatchEpoch = epoch
+	prov.EvaluatedArcs = sol.Evaluations
+	prov.MatchedCount = len(sol.Matches)
+	prov.TotalNetContribution = sol.TotalNetContribution
+	prov.TotalObjectiveValue = sol.TotalObjective
+
+	return action, prov, nil
 }

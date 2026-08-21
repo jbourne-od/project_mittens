@@ -129,7 +129,11 @@ func main() {
 		IdleTimeoutSec:  *idleTimeoutSec,
 		DatabaseURL:     databaseURL,
 	}
-	server := api.NewServer(srvCfg)
+	server, err := api.NewServer(srvCfg)
+	if err != nil {
+		slog.Error("Failed to initialize API server", "error", err)
+		os.Exit(1)
+	}
 
 	// 4. Start HTTP Server in background goroutine
 	serverErrChan := make(chan error, 1)

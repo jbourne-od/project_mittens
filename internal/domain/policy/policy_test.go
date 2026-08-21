@@ -308,13 +308,16 @@ func TestVFAPolicy_RegionalBiasing(t *testing.T) {
 		t.Fatalf("NewState failed: %v", err)
 	}
 
-	vfaPolicy := policy.NewVFAPolicy[model.Monopolistic](
+	vfaPolicy, err := policy.NewVFAPolicy[model.Monopolistic](
 		vfaTable,
 		1.0,
 		model.DefaultCostConfig(),
 		model.DefaultFeasibilityConfig(),
 		rm,
 	)
+	if err != nil {
+		t.Fatalf("NewVFAPolicy failed: %v", err)
+	}
 
 	action, _, err := vfaPolicy.Evaluate(context.Background(), state)
 	if err != nil {
@@ -328,6 +331,31 @@ func TestVFAPolicy_RegionalBiasing(t *testing.T) {
 	// L-DAL should be selected due to higher post-decision state value
 	if match := action.Matches()[0]; match.LoadID != "L-DAL" {
 		t.Fatalf("expected VFA to choose L-DAL, got %s", match.LoadID)
+	}
+}
+
+func TestVFAPolicy_ConstructorValidation(t *testing.T) {
+	vfaTable := policy.NewVFATable(map[string]float64{"CHI": 100.0})
+	rm := model.NewRegionManager(1.0, nil)
+	costCfg := model.DefaultCostConfig()
+	feasCfg := model.DefaultFeasibilityConfig()
+
+	// table == nil
+	if _, err := policy.NewVFAPolicy[model.Monopolistic](nil, 0.95, costCfg, feasCfg, rm); err == nil {
+		t.Errorf("expected error for table == nil, got nil")
+	}
+
+	// discount <= 0 or > 1.0
+	if _, err := policy.NewVFAPolicy[model.Monopolistic](vfaTable, 0.0, costCfg, feasCfg, rm); err == nil {
+		t.Errorf("expected error for discount <= 0, got nil")
+	}
+	if _, err := policy.NewVFAPolicy[model.Monopolistic](vfaTable, 1.5, costCfg, feasCfg, rm); err == nil {
+		t.Errorf("expected error for discount > 1.0, got nil")
+	}
+
+	// rm == nil
+	if _, err := policy.NewVFAPolicy[model.Monopolistic](vfaTable, 0.95, costCfg, feasCfg, nil); err == nil {
+		t.Errorf("expected error for rm == nil, got nil")
 	}
 }
 

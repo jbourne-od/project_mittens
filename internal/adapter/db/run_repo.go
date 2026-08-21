@@ -108,9 +108,10 @@ func (r *PostgresRunRepository) Get(ctx context.Context, runID string) (Optimiza
 
 	if len(metaBytes) > 0 {
 		var meta map[string]any
-		if err := json.Unmarshal(metaBytes, &meta); err == nil {
-			run.Metadata = meta
+		if err := json.Unmarshal(metaBytes, &meta); err != nil {
+			return OptimizationRun{}, fmt.Errorf("db: failed unmarshaling metadata for run %s: %w", runID, err)
 		}
+		run.Metadata = meta
 	}
 
 	return run, nil
@@ -156,9 +157,10 @@ func (r *PostgresRunRepository) List(ctx context.Context, limit, offset int) ([]
 
 		if len(metaBytes) > 0 {
 			var meta map[string]any
-			if err := json.Unmarshal(metaBytes, &meta); err == nil {
-				run.Metadata = meta
+			if err := json.Unmarshal(metaBytes, &meta); err != nil {
+				return nil, fmt.Errorf("db: failed unmarshaling metadata for run %s: %w", run.RunID, err)
 			}
+			run.Metadata = meta
 		}
 
 		runs = append(runs, run)

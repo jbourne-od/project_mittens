@@ -11,11 +11,15 @@ import (
 	"time"
 
 	"github.com/optimaldynamics/project-mittens/internal/adapter/api"
+	"github.com/optimaldynamics/project-mittens/internal/adapter/db"
 	"github.com/optimaldynamics/project-mittens/internal/adapter/stream"
 )
 
 func TestAPI_HealthAndMetrics(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 
 	// 1. Test /healthz
 	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
@@ -53,7 +57,10 @@ func TestAPI_HealthAndMetrics(t *testing.T) {
 }
 
 func TestAPI_OptimizeEndpoint(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 	now := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC).Unix()
 
 	reqPayload := api.OptimizeRequest{
@@ -134,7 +141,10 @@ func TestAPI_OptimizeEndpoint(t *testing.T) {
 }
 
 func TestAPI_OptimizeEndpoint_ValidationErrors(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 
 	// 1. Empty fleet error
 	emptyReq := api.OptimizeRequest{Epoch: 1000, Drivers: []api.DriverDTO{}}
@@ -196,7 +206,10 @@ func TestAPI_OptimizeEndpoint_ValidationErrors(t *testing.T) {
 }
 
 func TestAPI_OptimizeEndpoint_CompetitorScaleAndPolicies(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 	now := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC).Unix()
 
 	policies := []string{"CFA", "PiecewiseVFA", "DLA"}
@@ -246,7 +259,10 @@ func TestAPI_OptimizeEndpoint_CompetitorScaleAndPolicies(t *testing.T) {
 }
 
 func TestAPI_SimulateEndpoint(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 
 	startEpoch := time.Date(2026, 8, 19, 6, 0, 0, 0, time.UTC).Unix()
 	locChi := api.LocationDTO{NodeID: "CHI", Lat: 41.8781, Lon: -87.6298}
@@ -304,7 +320,10 @@ func TestAPI_SimulateEndpoint(t *testing.T) {
 func TestAPI_ServerLifecycle(t *testing.T) {
 	cfg := api.DefaultServerConfig()
 	cfg.Port = 0 // Auto-bind port
-	srv := api.NewServer(cfg)
+	srv, err := api.NewServer(cfg)
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -315,7 +334,10 @@ func TestAPI_ServerLifecycle(t *testing.T) {
 }
 
 func TestAPI_SemanticJournalAndExplainability(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 
 	reqPayload := api.OptimizeRequest{
 		Epoch:       1700000000,
@@ -487,7 +509,10 @@ func TestAPI_SemanticJournalAndExplainability(t *testing.T) {
 }
 
 func TestAPI_StreamingIngestionEndpoints(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 	nowEpoch := time.Now().UTC().Unix()
 
 	// 1. Ingest Telemetry Pings
@@ -581,7 +606,10 @@ func TestAPI_StreamingIngestionEndpoints(t *testing.T) {
 }
 
 func TestAPI_RepositionPlanEndpoint(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 	nowEpoch := time.Now().UTC().Unix()
 
 	repoReq := api.RepositionPlanRequestDTO{
@@ -638,7 +666,10 @@ func TestAPI_RepositionPlanEndpoint(t *testing.T) {
 }
 
 func TestAPI_ScenarioCatalogEndpoints(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 
 	// 1. Test GET /api/v1/scenarios
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/scenarios", nil)
@@ -691,7 +722,10 @@ func TestAPI_ScenarioCatalogEndpoints(t *testing.T) {
 }
 
 func TestAPI_StaticWebServing(t *testing.T) {
-	srv := api.NewServer(api.DefaultServerConfig())
+	srv, err := api.NewServer(api.DefaultServerConfig())
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
 
 	// 1. Test GET / (serves index.html from embedded web.Assets)
 	reqRoot, _ := http.NewRequest(http.MethodGet, "/", nil)
@@ -725,5 +759,39 @@ func TestAPI_StaticWebServing(t *testing.T) {
 
 	if rrAPI.Code != http.StatusNotFound {
 		t.Errorf("expected 404 Not Found for missing API route, got %d", rrAPI.Code)
+	}
+}
+
+func TestAPI_NewServer_FailClosedOnDBError(t *testing.T) {
+	// 1. Invalid database URL scheme / format fails closed
+	badURLCfg := api.DefaultServerConfig()
+	badURLCfg.DatabaseURL = "postgres://:invalid-port/db"
+	_, err := api.NewServer(badURLCfg)
+	if err == nil {
+		t.Error("expected NewServer to fail closed on invalid database URL, got nil")
+	}
+
+	// 2. Unreachable database host/port fails closed
+	unreachableURLCfg := api.DefaultServerConfig()
+	unreachableURLCfg.DatabaseURL = "postgres://mittens:secret@127.0.0.1:59999/mittens_test"
+	_, err = api.NewServer(unreachableURLCfg)
+	if err == nil {
+		t.Error("expected NewServer to fail closed on unreachable database URL, got nil")
+	}
+
+	// 3. Unreachable DBConfig fails closed
+	unreachableDBCfg := api.DefaultServerConfig()
+	unreachableDBCfg.DBConfig = &db.DBConfig{
+		Host:        "127.0.0.1",
+		Port:        59999,
+		Database:    "mittens_test",
+		User:        "mittens",
+		Password:    "secret",
+		SSLMode:     "disable",
+		ConnTimeout: 100 * time.Millisecond,
+	}
+	_, err = api.NewServer(unreachableDBCfg)
+	if err == nil {
+		t.Error("expected NewServer to fail closed on unreachable DBConfig, got nil")
 	}
 }

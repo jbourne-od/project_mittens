@@ -49,7 +49,10 @@ func TestTour_2LegChainedDispatchWithRest(t *testing.T) {
 
 	candidates := []model.Load{load2}
 
-	synthesizer := policy.NewTourSynthesizer(policy.DefaultTourSynthesizerConfig())
+	synthesizer, err := policy.NewTourSynthesizer(policy.DefaultTourSynthesizerConfig())
+	if err != nil {
+		t.Fatalf("NewTourSynthesizer failed: %v", err)
+	}
 
 	tour, err := synthesizer.SynthesizeTour(context.Background(), driver, load1, candidates)
 	if err != nil {
@@ -134,7 +137,10 @@ func TestTour_DomicileReturnSynthesis(t *testing.T) {
 	cfg := policy.DefaultTourSynthesizerConfig()
 	cfg.AutoRepositionHome = true // Enable auto-reposition back to CHI domicile
 
-	synthesizer := policy.NewTourSynthesizer(cfg)
+	synthesizer, err := policy.NewTourSynthesizer(cfg)
+	if err != nil {
+		t.Fatalf("NewTourSynthesizer failed: %v", err)
+	}
 
 	tour, err := synthesizer.SynthesizeTour(context.Background(), driver, load1, []model.Load{load2})
 	if err != nil {
@@ -183,6 +189,30 @@ func TestTour_Immutability(t *testing.T) {
 	// Verify internal tour state remains 100.0
 	if tour.Legs()[0].DistanceMiles != 100.0 {
 		t.Errorf("mutating returned Legs() slice mutated internal DriverTour state")
+	}
+}
+
+func TestTourSynthesizer_ConstructorValidation(t *testing.T) {
+	cfg := policy.DefaultTourSynthesizerConfig()
+
+	// MaxTourLegs <= 0
+	cfg.MaxTourLegs = 0
+	if _, err := policy.NewTourSynthesizer(cfg); err == nil {
+		t.Errorf("expected error for MaxTourLegs <= 0, got nil")
+	}
+
+	// MaxPlanningHorizonHours <= 0
+	cfg = policy.DefaultTourSynthesizerConfig()
+	cfg.MaxPlanningHorizonHours = 0.0
+	if _, err := policy.NewTourSynthesizer(cfg); err == nil {
+		t.Errorf("expected error for MaxPlanningHorizonHours <= 0, got nil")
+	}
+
+	// MaxDeadheadMiles <= 0
+	cfg = policy.DefaultTourSynthesizerConfig()
+	cfg.MaxDeadheadMiles = 0.0
+	if _, err := policy.NewTourSynthesizer(cfg); err == nil {
+		t.Errorf("expected error for MaxDeadheadMiles <= 0, got nil")
 	}
 }
 

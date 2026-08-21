@@ -8,6 +8,7 @@
 package service
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/optimaldynamics/project-mittens/internal/domain/model"
@@ -59,21 +60,21 @@ func NewPiecewiseVFALearner(
 	rm *model.RegionManager,
 	regionIndexMap map[string]int,
 	cfg VFALearningConfig,
-) *PiecewiseVFALearner {
+) (*PiecewiseVFALearner, error) {
 	if initialTable == nil {
-		initialTable = policy.NewPiecewiseLinearVFATable(nil)
+		return nil, fmt.Errorf("service: initialTable cannot be nil")
 	}
 	if rm == nil {
-		rm = model.NewRegionManager(1.0, nil)
+		return nil, fmt.Errorf("service: region manager cannot be nil")
 	}
 	if cfg.StepSize <= 0 {
-		cfg.StepSize = 0.1
+		return nil, fmt.Errorf("service: StepSize must be > 0, got %f", cfg.StepSize)
 	}
 	if cfg.HarmonicA <= 0 {
-		cfg.HarmonicA = 20.0
+		return nil, fmt.Errorf("service: HarmonicA must be > 0, got %f", cfg.HarmonicA)
 	}
 	if cfg.MaxSlopes <= 0 {
-		cfg.MaxSlopes = 10
+		return nil, fmt.Errorf("service: MaxSlopes must be > 0, got %d", cfg.MaxSlopes)
 	}
 
 	copiedIndexMap := make(map[string]int, len(regionIndexMap))
@@ -88,7 +89,7 @@ func NewPiecewiseVFALearner(
 		regionIndexMap: copiedIndexMap,
 		config:         cfg,
 		epochCount:     0,
-	}
+	}, nil
 }
 
 // Table returns the current PiecewiseLinearVFATable.
@@ -168,9 +169,10 @@ func (l *PiecewiseVFALearner) UpdateFromMatching(
 		if l.config.UseCKG && currentCKG != nil {
 			if rIdx, okR := l.regionIndexMap[destRegion]; okR {
 				updatedCKG, err := currentCKG.UpdateBayesian(rIdx, driverDual, l.config.CKGObservationVar)
-				if err == nil {
-					currentCKG = updatedCKG
+				if err != nil {
+					return nil, fmt.Errorf("service: CKG Bayesian update failed for region %s (index %d): %w", destRegion, rIdx, err)
 				}
+				currentCKG = updatedCKG
 			}
 		}
 	}

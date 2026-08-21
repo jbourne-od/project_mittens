@@ -57,7 +57,11 @@ func TestPiecewiseVFALearner_MultiEpochConvergence(t *testing.T) {
 		CKGObservationVar: 25.0,
 	}
 
-	learner := service.NewPiecewiseVFALearner(nil, priorCKG, rm, regionIndexMap, learnerCfg)
+	initialTable := policy.NewPiecewiseLinearVFATable(nil)
+	learner, err := service.NewPiecewiseVFALearner(initialTable, priorCKG, rm, regionIndexMap, learnerCfg)
+	if err != nil {
+		t.Fatalf("NewPiecewiseVFALearner failed: %v", err)
+	}
 
 	baseEpoch := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC).Unix()
 
@@ -117,7 +121,7 @@ func TestPiecewiseVFALearner_MultiEpochConvergence(t *testing.T) {
 		feasCfg := model.FeasibilityConfig{AverageSpeedMPH: 50.0, HOSPolicySpecs: hos.USPolicySpecs()}
 
 		// Active Piecewise VFA Policy using current learned slopes
-		vfaPolicy := policy.NewPiecewiseVFAPolicy[model.Monopolistic](
+		vfaPolicy, err := policy.NewPiecewiseVFAPolicy[model.Monopolistic](
 			learner.Table(),
 			learner.CKG(),
 			0.95,
@@ -125,6 +129,9 @@ func TestPiecewiseVFALearner_MultiEpochConvergence(t *testing.T) {
 			feasCfg,
 			rm,
 		)
+		if err != nil {
+			t.Fatalf("epoch %d: NewPiecewiseVFAPolicy failed: %v", epochIdx, err)
+		}
 
 		action, prov, err := vfaPolicy.Evaluate(context.Background(), state)
 		if err != nil {
@@ -172,5 +179,42 @@ func TestPiecewiseVFALearner_MultiEpochConvergence(t *testing.T) {
 
 	if nycSlopes.Slopes[0] <= 200.0 {
 		t.Errorf("expected NYC learned slope to increase from prior 200, got %v", nycSlopes.Slopes[0])
+	}
+}
+
+func TestPiecewiseVFALearner_ConstructorValidation(t *testing.T) {
+	initialTable := policy.NewPiecewiseLinearVFATable(nil)
+	rm := model.NewRegionManager(1.0, nil)
+	cfg := service.DefaultVFALearningConfig()
+
+	// initialTable == nil
+	if _, err := service.NewPiecewiseVFALearner(nil, nil, rm, nil, cfg); err == nil {
+		t.Errorf("expected error for initialTable == nil, got nil")
+	}
+
+	// rm == nil
+	if _, err := service.NewPiecewiseVFALearner(initialTable, nil, nil, nil, cfg); err == nil {
+		t.Errorf("expected error for rm == nil, got nil")
+	}
+
+	// cfg.StepSize <= 0
+	badCfg := cfg
+	badCfg.StepSize = 0.0
+	if _, err := service.NewPiecewiseVFALearner(initialTable, nil, rm, nil, badCfg); err == nil {
+		t.Errorf("expected error for StepSize <= 0, got nil")
+	}
+
+	// cfg.HarmonicA <= 0
+	badCfg = cfg
+	badCfg.HarmonicA = 0.0
+	if _, err := service.NewPiecewiseVFALearner(initialTable, nil, rm, nil, badCfg); err == nil {
+		t.Errorf("expected error for HarmonicA <= 0, got nil")
+	}
+
+	// cfg.MaxSlopes <= 0
+	badCfg = cfg
+	badCfg.MaxSlopes = 0
+	if _, err := service.NewPiecewiseVFALearner(initialTable, nil, rm, nil, badCfg); err == nil {
+		t.Errorf("expected error for MaxSlopes <= 0, got nil")
 	}
 }
